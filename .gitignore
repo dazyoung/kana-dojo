@@ -1,0 +1,14 @@
+# Data: the database with accounts and progress
+/var/
+*.db
+*.db-wal
+*.db-shm
+
+# This machine's own setup (service config, addresses, backups): kept locally, never committed
+/local/
+/backup/
+
+# Tool and OS files
+/.claude/
+.DS_Store
+node_modules/
