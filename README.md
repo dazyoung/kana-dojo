@@ -84,13 +84,27 @@ node server/admin.js backup ~/kana-backup.db     # copy the whole database
    - **write it from memory**
    - then do a short quiz on the whole set.
 2. **Do your reviews** whenever the Review button shows cards due. This is spaced repetition: each
-   correct answer pushes the next review further out (4 h → 1 d → 2 d → 4 d → 8 d → 16 d → 35 d → 90 d).
-   A miss brings the card back sooner.
+   correct answer moves a card up a level and pushes its next review further out. New cards get several
+   short reviews on their first day, then the gaps grow to days, weeks and months:
+
+   | Stage | Levels | Next review after |
+   | --- | --- | --- |
+   | Seen | 1–4 | 15 min → 1 h → 4 h → 8 h |
+   | Learning | 5–7 | 1 day → 2 days → 4 days |
+   | Familiar | 8–9 | 1 week → 2 weeks |
+   | Mastered | 10–12 | 1 month → 2 months → 4 months |
+
+   A miss drops the card back (1 level while Seen, 2 while Learning or Familiar, 3 when Mastered) and
+   brings it back within the hour. Each wait varies by ±10% so cards spread out. The waits are set in
+   `INTERVALS` in `js/srs.js`.
 3. **Add the next lesson when reviews are done.** A good pace is one lesson a day. That covers the 46
    basic hiragana in about 10 days, and all hiragana (with ゛/゜ and the きゃ-type combos) in about 2 weeks.
    Then switch the tab to カタカナ and do the same.
 4. **Read words.** Once you know a few characters, *Extra practice → Words* shows real words
    made only of kana you've learned. This is where reading starts to feel natural, so use it often.
+5. **Check your progress** with *Stats* (or tap the streak): characters known and mastered, words you
+   can read, streak and accuracy, characters by stage, answers per day, reviews coming up over the next
+   week, and the characters you miss most.
 
 Each character has two separate cards, **reading** (kana → romaji) and **writing** (romaji → you
 write it), because recognising a character and producing it are different skills.

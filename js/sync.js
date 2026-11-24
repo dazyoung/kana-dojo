@@ -43,6 +43,14 @@
     return json;
   }
 
+  // Send progress, get back the merged progress. Only accepted from a server that speaks the same
+  // progress format (a server mid-update could still be running the previous version).
+  async function exchange(progress) {
+    const r = await api('sync', { client: M.FORMAT, progress });
+    if (r.format !== M.FORMAT) throw new Error('The server is being updated. Try again in a minute.');
+    return M.clean(r.progress, S.device);
+  }
+
   // ---------- syncing ----------
   let changes = 0, running = null, timer = null;
   const schedule = (ms) => { clearTimeout(timer); timer = setTimeout(sync, ms); };
@@ -63,10 +71,10 @@
       const seen = changes;
       setStatus('syncing');
       try {
-        const { progress } = await api('sync', { progress: S.progress() });
+        const remote = await exchange(S.progress());
         // Combine with the latest local progress (it may have changed while we waited).
         const local = S.progress();
-        const merged = M.merge(M.clean(progress, S.device), local);
+        const merged = M.merge(remote, local);
         const changed = !M.same(merged, local);
         if (changed) S.replaceProgress(merged);
         acc.lastSync = Date.now();
@@ -100,8 +108,7 @@
     try {
       acc = { username: r.username, token: r.token, lastSync: 0, dirty: false };
       // Fetch the account's progress (sending nothing), then decide what to do with this device's.
-      const { progress } = await api('sync', { progress: M.empty() });
-      const remote = M.clean(progress, S.device);
+      const remote = await exchange(M.empty());
       const local = S.progress();
       let next;
       if (!prevOwner) next = M.merge(remote, { ...local, gen: remote.gen }); // not signed in before: add it to the account

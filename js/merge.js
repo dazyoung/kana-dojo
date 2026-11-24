@@ -1,14 +1,19 @@
 // Progress format + merging. Shared by the browser (window.KanaMerge) and the server (require).
 //
-// Progress (v2):
-//   { v: 2, gen, cards: { "あ|read": { level, due, ok, bad, last, t } }, log: { "2026-11-24": { <device>: { n, ok } } } }
+// Progress (format 3):
+//   { v: 3, gen, cards: { "あ|read": { level, due, ok, bad, last, t, at } }, log: { "2026-11-24": { <device>: { n, ok } } } }
 //
-// - cards: one per character+skill. `t` is when the card last changed; when two devices both
-//   changed a card, the newer change wins.
+// - cards: one per character+skill. `level` is 1–12 (see INTERVALS in srs.js), `at` is when it was
+//   learned (0 if learned before that was recorded), `t` is when the card last changed; when two
+//   devices both changed a card, the newer change wins.
 // - log: answers per day, counted separately per device so totals from several devices add up
 //   correctly no matter how often they sync (each device's count only ever grows).
 // - gen: bumped (set to the current time) by "Reset" and "Import". Progress from an older
 //   generation is replaced, not merged, so a reset doesn't get undone by another device.
+//
+// Older formats are converted when cleaned: format 1 (one answer count per day) and formats 1–2,
+// whose levels were 1–8 on a slower timeline (4h, 1d, 2d, 4d, 8d, 16d, 35d, 90d). Each old level
+// moves to the new level with the nearest wait.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -18,19 +23,23 @@
   const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
   const DEVICE = /^[a-z0-9]{3,32}$/;
   const LIMITS = { cards: 50000, days: 20000, devicesPerDay: 50 };
+  const FORMAT = 3;
+  const OLD_LEVELS = [0, 3, 5, 6, 7, 8, 9, 10, 11]; // format 1–2 level → format 3 level
 
   const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
   const num = (x, d = 0) => (typeof x === 'number' && Number.isFinite(x) ? x : d);
   const int = (x, lo, hi) => Math.min(hi, Math.max(lo, Math.round(num(x))));
 
-  const empty = (gen = 0) => ({ v: 2, gen, cards: {}, log: {} });
+  const empty = (gen = 0) => ({ v: FORMAT, gen, cards: {}, log: {} });
 
-  function cleanCard(c) {
+  function cleanCard(c, oldLevels) {
     if (!isObj(c)) return null;
     const last = num(c.last);
+    let level = int(c.level, 0, 99);
+    if (oldLevels) level = OLD_LEVELS[Math.min(level, OLD_LEVELS.length - 1)];
     return {
-      level: int(c.level, 0, 99), due: num(c.due), ok: int(c.ok, 0, 1e9), bad: int(c.bad, 0, 1e9),
-      last, t: num(c.t, last),
+      level, due: num(c.due), ok: int(c.ok, 0, 1e9), bad: int(c.bad, 0, 1e9),
+      last, t: num(c.t, last), at: num(c.at),
     };
   }
 
@@ -39,12 +48,13 @@
   function clean(p, device = 'old') {
     const out = empty(isObj(p) ? num(p.gen) : 0);
     if (!isObj(p)) return out;
+    const oldLevels = num(p.v, 1) < FORMAT;
     if (isObj(p.cards)) {
       let n = 0;
       for (const k of Object.keys(p.cards)) {
         if (n >= LIMITS.cards) break;
         if (!CARD_KEY.test(k)) continue;
-        const c = cleanCard(p.cards[k]);
+        const c = cleanCard(p.cards[k], oldLevels);
         if (c) { out.cards[k] = c; n++; }
       }
     }
@@ -106,7 +116,7 @@
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
       const x = a.cards[k], y = b.cards[k];
-      if (!y || x.t !== y.t || x.level !== y.level || x.due !== y.due || x.ok !== y.ok || x.bad !== y.bad) return false;
+      if (!y || x.t !== y.t || x.level !== y.level || x.due !== y.due || x.ok !== y.ok || x.bad !== y.bad || x.at !== y.at) return false;
     }
     const da = Object.keys(a.log), db = Object.keys(b.log);
     if (da.length !== db.length) return false;
@@ -124,5 +134,5 @@
     answers: Object.values(p.log).reduce((s, devs) => s + Object.values(devs).reduce((t, e) => t + e.n, 0), 0),
   });
 
-  return { empty, clean, merge, same, copy, stats, DEVICE };
+  return { empty, clean, merge, same, copy, stats, DEVICE, FORMAT };
 });

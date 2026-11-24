@@ -123,10 +123,11 @@
   let lesson = null;  // active lesson walkthrough
   let detailWriter = null;
 
+  // Chart colour = stage (Seen, Learning, Familiar, Mastered) of the weaker of the character's cards.
   function tierOf(u) {
     if (!S.isLearned(u)) return 0;
     const lv = info(u).write && writeOn() ? Math.min(S.level(u, 'read'), S.level(u, 'write') || 1) : S.level(u, 'read');
-    return lv <= 2 ? 1 : lv <= 4 ? 2 : lv <= 6 ? 3 : 4;
+    return Math.max(1, S.stageOf(lv));
   }
 
   function chartHTML(sc) {
@@ -137,6 +138,18 @@
       return `<section class="chart-sec"><h3>${sec.label}</h3><div class="grid ${sec.cols === 3 ? 'combo' : ''}">${cells}</div></section>`;
     }).join('');
   }
+
+  const reviewText = (due, nextDue) => (due
+    ? `<b>${due}</b> due now`
+    : nextDue < Infinity ? `All caught up · next in ${fmtWait(nextDue - Date.now())}` : 'Learn a lesson to start');
+
+  // Keep the Review button current while the home screen is open: with the short first-day steps,
+  // cards come due every few minutes.
+  let homeSig = '';
+  setInterval(() => {
+    if (sess || lesson || document.hidden || !modalRoot.hidden || !$('.home')) return;
+    if (reviewText(S.due(reviewFilter).length, S.nextDue(reviewFilter)) !== homeSig) renderHome();
+  }, 20e3);
 
   function renderHome() {
     sess = null;
@@ -152,9 +165,8 @@
     const anyLearned = learned > 0;
     const streak = S.streak();
 
-    const reviewSub = due
-      ? `<b>${due}</b> due now`
-      : nextDue < Infinity ? `All caught up · next in ${fmtWait(nextDue - Date.now())}` : 'Learn a lesson to start';
+    const reviewSub = reviewText(due, nextDue);
+    homeSig = reviewSub;
 
     app.innerHTML = `
     <div class="home">
@@ -162,8 +174,8 @@
         <div class="brand"><span class="logo">かな</span><span>Kana Dojo</span></div>
         <div class="top-right">
           <span class="sync-slot">${syncPillHTML()}</span>
-          ${streak ? `<span class="pill" title="Days in a row">${streak}-day streak</span>` : ''}
-          <span class="pill muted" title="Answers today">${S.todayCount()} today</span>
+          ${streak ? `<button class="pill btn-pill" data-act="stats" title="Days in a row · open stats">${streak}-day streak</button>` : ''}
+          <button class="pill btn-pill muted" data-act="stats" title="Answers today · open stats">${S.todayCount()} today</button>
           <button class="icon" data-act="settings" aria-label="Settings">⚙︎</button>
         </div>
       </header>
@@ -196,7 +208,10 @@
 
       <div class="chart-head">
         <h2>${SCRIPT_JA[sc]} <span class="muted">${learned} / ${units.length} learned</span></h2>
-        <button class="btn ghost" data-act="lessons">All lessons</button>
+        <div class="chart-btns">
+          <button class="btn ghost" data-act="stats">Stats</button>
+          <button class="btn ghost" data-act="lessons">All lessons</button>
+        </div>
       </div>
       <div class="legend">
         <span><i class="t0"></i>New</span><span><i class="t1"></i>Seen</span><span><i class="t2"></i>Learning</span>
@@ -505,7 +520,7 @@
     startSession({
       kind: 'quiz', title: `${g.label} lesson`, items,
       onEnd: () => g.kana.forEach((u) => S.learn(u, skillsFor(u))),
-      endNote: 'These characters are now in your reviews — the first review comes up in about 4 hours.',
+      endNote: 'These characters are now in your reviews. The first review comes up in about 15 minutes, then a few more today.',
     });
   }
 
@@ -606,13 +621,14 @@
     if (detailWriter) { detailWriter.destroy(); detailWriter = null; }
     modalRoot.hidden = true;
     modalRoot.innerHTML = '';
+    hideTip();
     if (!silent && !sess && !lesson && $('.home')) renderHome();
   }
 
   function statLine(label, u, skill) {
     const c = S.card(u, skill);
     if (!c) return `<div><span>${label}</span><span class="muted">not learned yet</span></div>`;
-    return `<div><span>${label}</span><span>level ${c.level}/${S.MAX} · ${c.ok}✓ ${c.bad}✗ · review ${c.due <= Date.now() ? 'due now' : 'in ' + fmtWait(c.due - Date.now())}</span></div>`;
+    return `<div><span>${label}</span><span>${S.STAGES[S.stageOf(c.level)].name} · level ${c.level}/${S.MAX} · ${c.ok}✓ ${c.bad}✗ · review ${c.due <= Date.now() ? 'due now' : 'in ' + fmtWait(c.due - Date.now())}</span></div>`;
   }
 
   function openDetail(u) {
@@ -662,6 +678,153 @@
     speak(u);
   }
   const detailMode = (m) => (m === 'trace' ? { mode: 'trace', guide: true, numbers: true } : { mode: 'recall', guide: false });
+
+  // =====================================================================
+  // Stats
+  // =====================================================================
+  const DAY = 864e5;
+  const pct = (ok, n) => (n ? `${Math.round((100 * ok) / n)}%` : '–');
+  const niceMax = (v) => { // a round number at or above v, for the top of a y-axis
+    if (v <= 5) return 5;
+    const p = 10 ** Math.floor(Math.log10(v));
+    return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
+  };
+  const dayLabel = (t, opts = { weekday: 'short', day: 'numeric', month: 'short' }) => new Date(t).toLocaleDateString(undefined, opts);
+
+  function tile(label, value, sub) {
+    return `<div class="tile"><div class="t-label">${label}</div><div class="t-value">${value}</div>${sub ? `<div class="t-sub">${sub}</div>` : ''}</div>`;
+  }
+
+  // Column chart, one series. cols: [{ v, label, tip, cap }]. Every column carries a tooltip and an
+  // accessible name; `cap` prints the value above the column.
+  function columns(cols, { title, axisLabels, tableHead }) {
+    const max = niceMax(Math.max(1, ...cols.map((c) => c.v)));
+    const bars = cols.map((c) => `
+      <div class="col${c.now ? ' now' : ''}" tabindex="0" data-tip="${esc(c.tip)}" aria-label="${esc(c.tip)}">
+        ${c.cap && c.v ? `<span class="cap">${c.v}</span>` : ''}
+        <i style="height:${(100 * c.v) / max}%"></i>
+      </div>`).join('');
+    const rows = cols.map((c) => `<tr><td>${esc(c.label)}</td><td>${c.v}</td></tr>`).join('');
+    return `
+      <div class="cchart" role="group" aria-label="${esc(title)}">
+        <div class="c-y"><span>${max}</span><span>${max / 2}</span><span>0</span></div>
+        <div class="c-plot"><div class="c-grid"><i></i><i></i><i></i></div><div class="c-bars">${bars}</div></div>
+        <span></span>
+        <div class="c-x${axisLabels.length === cols.length ? ' even' : ''}" style="--n:${axisLabels.length}">${axisLabels.map((l) => `<span>${esc(l)}</span>`).join('')}</div>
+      </div>
+      <details class="c-table"><summary>Show as table</summary><table><thead><tr><th>${tableHead[0]}</th><th>${tableHead[1]}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
+  }
+
+  function openStats() {
+    const now = Date.now();
+    const units = Object.keys(K.info);
+    const learnedUnits = units.filter(S.isLearned);
+    const mastered = learnedUnits.filter((u) => tierOf(u) === 4).length;
+    const readCard = (u) => S.card(u, 'read');
+    const newThisWeek = learnedUnits.filter((u) => (readCard(u).at || 0) > now - 7 * DAY).length;
+    const readable = K.words.filter(([w]) => wordKnown(w)).length;
+    const days = S.days();
+    let n7 = 0, ok7 = 0, total = 0, totalOk = 0;
+    for (let i = 0; i < 7; i++) { const d = days[S.today(now - i * DAY)]; if (d) { n7 += d.n; ok7 += d.ok; } }
+    for (const d of Object.values(days)) { total += d.n; totalOk += d.ok; }
+    const streak = S.streak(), best = S.bestStreak();
+
+    // Characters by stage, per script (thin segmented bars; the figures sit beside them).
+    const stageRows = ['hiragana', 'katakana'].map((sc) => {
+      const us = units.filter((u) => scriptOf(u) === sc);
+      const counts = [0, 0, 0, 0, 0];
+      us.forEach((u) => counts[tierOf(u)]++);
+      const segs = [1, 2, 3, 4].filter((t) => counts[t]).map((t) => {
+        const tip = `${S.STAGES[t].name}: ${counts[t]} of ${us.length} ${sc}`;
+        return `<i class="seg t${t}" style="flex-grow:${counts[t]}" tabindex="0" data-tip="${tip}" aria-label="${tip}"></i>`;
+      }).join('');
+      const rest = counts[0] ? `<i class="seg rest" style="flex-grow:${counts[0]}" tabindex="0" data-tip="New: ${counts[0]} not learned yet" aria-label="New: ${counts[0]} not learned yet"></i>` : '';
+      const learned = us.length - counts[0];
+      return `<div class="srow2">
+        <div class="s-name"><span class="kana">${SCRIPT_JA[sc]}</span> ${sc[0].toUpperCase() + sc.slice(1)}</div>
+        <div class="sbar">${segs}${rest}</div>
+        <div class="s-fig">${learned} / ${us.length} learned · ${counts[4]} mastered</div>
+      </div>`;
+    }).join('');
+
+    // Answers per day, last 30 days.
+    const act = [];
+    for (let i = 29; i >= 0; i--) {
+      const t = now - i * DAY;
+      const d = days[S.today(t)] || { n: 0, ok: 0 };
+      const label = i === 0 ? 'Today' : dayLabel(t);
+      act.push({ v: d.n, label, now: i === 0, tip: `${label}: ${d.n} answer${d.n === 1 ? '' : 's'}${d.n ? `, ${pct(d.ok, d.n)} correct` : ''}` });
+    }
+
+    // Reviews coming up: today (including any due now), then each of the next 6 days.
+    const cards = S.all(reviewFilter);
+    const endOfToday = new Date(new Date(now).setHours(24, 0, 0, 0)).getTime();
+    const fc = [];
+    for (let i = 0; i < 7; i++) {
+      const from = i === 0 ? -Infinity : endOfToday + (i - 1) * DAY, to = endOfToday + i * DAY;
+      const v = cards.filter((x) => x.card.due >= from && x.card.due < to).length;
+      const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayLabel(from + 1, { weekday: 'short' });
+      fc.push({ v, label, cap: true, now: i === 0, tip: `${label}: ${v} review${v === 1 ? '' : 's'}` });
+    }
+    const dueNow = cards.filter((x) => x.card.due <= now).length;
+    const nextHour = cards.filter((x) => x.card.due > now && x.card.due <= now + 3600e3).length;
+
+    // Characters to work on: lowest accuracy, at least 3 answers.
+    const weak = cards.filter((x) => x.card.ok + x.card.bad >= 3 && x.card.bad > 0)
+      .sort((a, b) => a.card.ok / (a.card.ok + a.card.bad) - b.card.ok / (b.card.ok + b.card.bad) || b.card.bad - a.card.bad)
+      .slice(0, 8);
+
+    modal(`
+      <h2>Stats</h2>
+      <div class="tiles">
+        ${tile('Characters known', learnedUnits.length, `of ${units.length} kana${newThisWeek ? ` · +${newThisWeek} this week` : ''}`)}
+        ${tile('Words you can read', readable, `of ${K.words.length} practice words`)}
+        ${tile('Mastered', mastered, 'characters')}
+        ${tile('Streak', `${streak} day${streak === 1 ? '' : 's'}`, `best ${best}`)}
+        ${tile('Accuracy, 7 days', pct(ok7, n7), `${n7} answers · ${total} all time`)}
+      </div>
+
+      <h3>Characters by stage</h3>
+      <div class="stage-rows">${stageRows}</div>
+      <div class="legend">${[1, 2, 3, 4].map((t) => `<span><i class="t${t}"></i>${S.STAGES[t].name}</span>`).join('')}<span><i class="rest"></i>New</span></div>
+      <p class="muted small-note">Seen: first day (reviews after 15 min, 1 h, 4 h, 8 h) · Learning: days · Familiar: weeks · Mastered: months.
+        A character counts at the stage of its weaker card (reading or writing).</p>
+
+      <h3>Answers per day <span class="muted">· last 30 days · ${pct(totalOk, total)} correct overall</span></h3>
+      ${columns(act, { title: 'Answers per day, last 30 days', axisLabels: [act[0].label, act[15].label, 'Today'], tableHead: ['Day', 'Answers'] })}
+
+      <h3>Reviews coming up <span class="muted">· ${dueNow} due now · ${nextHour} more in the next hour</span></h3>
+      ${columns(fc, { title: 'Reviews coming up, next 7 days', axisLabels: fc.map((c) => c.label), tableHead: ['Day', 'Reviews'] })}
+
+      <h3>Characters to work on</h3>
+      ${weak.length ? `<table class="weak"><thead><tr><th></th><th>Card</th><th>Correct</th><th>Stage</th></tr></thead><tbody>
+        ${weak.map((x) => `<tr>
+          <td><button class="chip kana" data-act="detail" data-u="${x.unit}">${x.unit}</button></td>
+          <td>${romaji(x.unit)} · ${x.skill === 'read' ? 'reading' : 'writing'}</td>
+          <td>${pct(x.card.ok, x.card.ok + x.card.bad)} <span class="muted">(${x.card.bad} missed)</span></td>
+          <td>${S.STAGES[S.stageOf(x.card.level)].name}</td></tr>`).join('')}
+      </tbody></table>` : '<p class="muted">Nothing yet: characters you miss often will show up here.</p>'}
+    `, 'stats-sheet');
+  }
+
+  // Tooltips for chart marks ([data-tip]): on hover and on keyboard focus.
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.setAttribute('role', 'tooltip');
+  tip.hidden = true;
+  document.body.appendChild(tip);
+  function showTip(el) {
+    tip.textContent = el.dataset.tip;
+    tip.hidden = false;
+    const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.min(innerWidth - w - 6, Math.max(6, r.left + r.width / 2 - w / 2))}px`;
+    tip.style.top = `${r.top - h - 8 < 6 ? r.bottom + 8 : r.top - h - 8}px`;
+  }
+  const hideTip = () => { tip.hidden = true; };
+  document.addEventListener('pointerover', (e) => { const el = e.target.closest('[data-tip]'); el ? showTip(el) : hideTip(); });
+  document.addEventListener('focusin', (e) => { const el = e.target.closest('[data-tip]'); el ? showTip(el) : hideTip(); });
+  document.addEventListener('focusout', hideTip);
+  document.addEventListener('scroll', hideTip, true);
 
   function openLessons() {
     const sc = S.settings.script;
@@ -877,6 +1040,7 @@
       case 'words': startWords(); break;
       case 'learn-group': startLesson(K.groups.find((g) => g.id === b.dataset.g)); break;
       case 'lessons': openLessons(); break;
+      case 'stats': openStats(); break;
       case 'settings': openSettings(); break;
       case 'detail': openDetail(b.dataset.u); break;
       case 'm-close': closeModal(); break;

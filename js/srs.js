@@ -9,10 +9,26 @@
 (function () {
   const M = window.KanaMerge;
   const OLD_KEY = 'kana-dojo-v1', PROG_KEY = 'kana-dojo-progress', SET_KEY = 'kana-dojo-settings', DEV_KEY = 'kana-dojo-device';
-  const H = 3600e3, D = 24 * H;
-  // Wait time after reaching each level. Level 0 = not learned yet.
-  const INTERVALS = [0, 4 * H, 1 * D, 2 * D, 4 * D, 8 * D, 16 * D, 35 * D, 90 * D];
+  const M_ = 60e3, H = 3600e3, D = 24 * H;
+  // Wait before the next review after reaching each level (level 0 = not learned yet).
+  // Several short steps on the first day, then days, weeks and months.
+  const INTERVALS = [0,
+    15 * M_, 1 * H, 4 * H, 8 * H, //  1–4  Seen: same day
+    1 * D, 2 * D, 4 * D, //           5–7  Learning: days
+    7 * D, 14 * D, //                 8–9  Familiar: weeks
+    30 * D, 60 * D, 120 * D, //       10–12 Mastered: months
+  ];
   const MAX = INTERVALS.length - 1;
+  // Stages group the levels; the chart colours and stats use them.
+  const STAGES = [
+    { name: 'New', from: 0, to: 0 },
+    { name: 'Seen', from: 1, to: 4 },
+    { name: 'Learning', from: 5, to: 7 },
+    { name: 'Familiar', from: 8, to: 9 },
+    { name: 'Mastered', from: 10, to: MAX },
+  ];
+  const stageOf = (level) => STAGES.findIndex((st) => level >= st.from && level <= st.to);
+  const MISS_WAIT = 1 * H; // after a miss, the card comes back within the hour
   const DEFAULTS = {
     script: 'hiragana', sound: true, writeReviews: true, leniency: 'normal', varyFont: false, chartRomaji: true,
   };
@@ -51,7 +67,7 @@
   const fuzz = () => 0.9 + Math.random() * 0.2;
 
   const SRS = {
-    INTERVALS, MAX,
+    INTERVALS, MAX, STAGES, stageOf,
     device,
     onChange: null, // set by sync.js: called after every progress change
     get settings() { return settings; },
@@ -66,7 +82,7 @@
       let changed = false;
       for (const s of skills) {
         const k = key(unit, s);
-        if (!prog.cards[k]) { prog.cards[k] = { level: 1, due: now + INTERVALS[1], ok: 0, bad: 0, last: now, t: now }; changed = true; }
+        if (!prog.cards[k]) { prog.cards[k] = { level: 1, due: now + INTERVALS[1], ok: 0, bad: 0, last: now, t: now, at: now }; changed = true; }
       }
       if (changed) save();
     },
@@ -81,8 +97,9 @@
         c.due = now + INTERVALS[c.level] * fuzz();
         c.ok++;
       } else {
-        c.level = Math.max(1, c.level - (c.level >= 5 ? 2 : 1));
-        c.due = now + Math.min(INTERVALS[c.level], D);
+        // Drop further the higher it was: 1 level while Seen, 2 while Learning/Familiar, 3 when Mastered.
+        c.level = Math.max(1, c.level - (c.level <= 4 ? 1 : c.level <= 9 ? 2 : 3));
+        c.due = now + Math.min(INTERVALS[c.level], MISS_WAIT);
         c.bad++;
       }
       c.last = c.t = now;
@@ -134,6 +151,27 @@
     },
 
     todayCount: () => dayTotal(today()),
+    today,
+    // Answers per day, all devices added up: { "2026-11-24": { n, ok } }.
+    days() {
+      const out = {};
+      for (const [day, devs] of Object.entries(prog.log)) {
+        const e = (out[day] = { n: 0, ok: 0 });
+        for (const d of Object.values(devs)) { e.n += d.n; e.ok += d.ok; }
+      }
+      return out;
+    },
+    bestStreak() {
+      const days = Object.keys(prog.log).filter((d) => dayTotal(d)).sort();
+      let best = 0, run = 0, prev = null;
+      for (const d of days) {
+        const t = new Date(d + 'T12:00:00').getTime();
+        run = prev !== null && Math.round((t - prev) / D) === 1 ? run + 1 : 1;
+        best = Math.max(best, run);
+        prev = t;
+      }
+      return best;
+    },
     streak() {
       let n = 0;
       let t = Date.now();

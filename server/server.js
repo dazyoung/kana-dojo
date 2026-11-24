@@ -219,12 +219,15 @@ const routes = {
   },
 
   // Send this device's progress; get back the merged progress from all devices.
+  // Both sides say which progress format they speak (merge.js FORMAT). An app page loaded before an
+  // update is refused rather than merged, since it would misread the newer format.
   'POST /api/sync': async (req) => {
     const { user } = authUser(req);
     if (tooMany('sync:' + user.id, 120, 60e3)) throw new HttpError(429, 'Syncing too often');
     const body = await readJSON(req);
+    if (!(Number(body.client) >= M.FORMAT)) throw new HttpError(409, 'The app was updated. Reload the page to keep syncing.');
     const progress = syncProgress(user.id, body.progress);
-    return { progress, stats: M.stats(progress) };
+    return { format: M.FORMAT, progress, stats: M.stats(progress) };
   },
 
   'POST /api/password': async (req) => {
