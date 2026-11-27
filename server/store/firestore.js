@@ -11,6 +11,9 @@
 //   progress/<user id>                    { updated, parts, data, snaps: [{ label, parts }] newest first }
 //   progress/<user id>/snapshots/<sha1 of label>   { label, parts, data }
 //   <any of the above>/parts/<n>          { data }   the rest of a large blob
+//   metrics/<day>                         { day, c: { key: total } }   usage totals (server/metrics.js)
+//   metrics/<day>/seen/<kind>             { h: [one-way codes] }       kept two days
+//   secrets/<name>                        { value }
 //
 // Progress and snapshots are stored gzipped (about 5x smaller) and split into parts of at most PART bytes,
 // because a Firestore document holds at most 1 MiB.
@@ -353,6 +356,65 @@ function open({ project, database = '(default)', prefix = '', partSize = PART } 
       const n = snapshotDoc(userId, String(label));
       const s = await getDoc(n);
       return s ? readBlob(n, s) : null;
+    },
+
+    async countUsers() {
+      const res = await call('POST', '{root}:runAggregationQuery', {
+        structuredAggregationQuery: { structuredQuery: { from: [{ collectionId: prefix + 'users' }] }, aggregations: [{ alias: 'n', count: {} }] },
+      });
+      const r = res.find((x) => x.result);
+      return r ? Number(r.result.aggregateFields.n.integerValue) : 0;
+    },
+
+    // ---------- usage metrics: see store/sqlite.js ----------
+    addMetrics(day, counters, seen = {}) {
+      const dayDoc = name('metrics', day);
+      const kinds = Object.keys(seen).filter((k) => seen[k].length);
+      return inTransaction(async (transaction, writes) => {
+        const add = { ...counters };
+        const docs = await getDocs(kinds.map((k) => `${dayDoc}/seen/${k}`), transaction);
+        for (const kind of kinds) {
+          const n = `${dayDoc}/seen/${kind}`;
+          const have = new Set((docs.get(n) || {}).h || []);
+          const fresh = [...new Set(seen[kind])].filter((h) => !have.has(h));
+          if (!fresh.length) continue;
+          add[kind] = (add[kind] || 0) + fresh.length;
+          // A day's codes stay well under the 1 MiB document limit up to ~40,000 visitors; past that, only count.
+          if (have.size + fresh.length <= 40000) {
+            writes.push(set(n, { h: V.arr([...have, ...fresh].map(V.str)) }));
+          }
+        }
+        const transforms = Object.entries(add).filter(([, v]) => v)
+          .map(([k, v]) => ({ fieldPath: `c.${k}`, increment: V.int(v) }));
+        if (transforms.length) {
+          writes.push({ update: { name: dayDoc, fields: { day: V.str(day) } }, updateMask: { fieldPaths: ['day'] }, updateTransforms: transforms });
+        }
+      });
+    },
+    async getMetrics(from, to) {
+      const days = [];
+      for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) {
+        days.push(new Date(t).toISOString().slice(0, 10));
+      }
+      const docs = await getDocs(days.map((d) => name('metrics', d)));
+      return days.filter((d) => docs.has(name('metrics', d))).map((d) => ({ day: d, counters: docs.get(name('metrics', d)).c || {} }));
+    },
+    async forgetSeen(day) {
+      const writes = [];
+      for (let i = 1; i <= 10; i++) {
+        const d = new Date(Date.parse(day + 'T00:00:00Z') - i * 864e5).toISOString().slice(0, 10);
+        for (const kind of ['visitors', 'accounts']) writes.push(del(name('metrics', d, 'seen', kind)));
+      }
+      await commit(writes);
+    },
+    async secret(secretName) {
+      const n = name('secrets', secretName);
+      try {
+        await call('POST', '{root}:commit', { writes: [set(n, { value: V.str(crypto.randomBytes(32).toString('hex')) }, { currentDocument: { exists: false } })] });
+      } catch (e) {
+        if (e.status !== 'ALREADY_EXISTS' && e.status !== 'FAILED_PRECONDITION') throw e;
+      }
+      return (await getDoc(n)).value;
     },
 
     async close() {},

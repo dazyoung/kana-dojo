@@ -12,6 +12,12 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- Usage metrics, built in and private: the app sends anonymous totals (visits, answers, characters written and
+  learned, lessons, drills, workouts), with or without an account, and the server counts sign-ups, sign-ins
+  and syncs. Daily visitors and active accounts are counted by one-way codes kept for two days.
+  `node server/admin.js metrics [days]` prints the report. No cookies, no third parties.
+- Settings → Share anonymous usage counts (off from the start if the browser asks not to be tracked), and the
+  privacy note explains it all.
 ## 0.8.0 (2026-11-27)
 
 - The "☕ Buy me a coffee" link moves from the bottom of the home page to the header (just ☕ on phones).

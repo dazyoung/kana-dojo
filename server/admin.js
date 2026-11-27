@@ -7,6 +7,7 @@
 //   node server/admin.js reset-password <user>       set a new random password and print it
 //   node server/admin.js delete <user>               delete an account and its progress
 //   node server/admin.js backup <file>               copy the whole database to <file> (SQLite only)
+//   node server/admin.js metrics [days]              usage over the last 30 (or [days]) days
 //
 // Add --db <file> to use a database other than var/kana-dojo.db, or --firestore <project> for the
 // Firestore database of a Google Cloud project (signed in with `gcloud auth login`).
@@ -35,6 +36,49 @@ async function user(name) {
   const u = name && await db.userByName(name);
   if (!u) { console.error(`No user "${name}"`); process.exit(1); }
   return u;
+}
+
+// The usage report: a line per day, then the period by script. "no acct" = devices not signed in.
+const SCRIPTS = ['hiragana', 'katakana', 'kanji', 'vocab'];
+function report(rows, accounts, from, to) {
+  const sum = (c, re) => Object.entries(c).filter(([k]) => re.test(k)).reduce((t, [, n]) => t + n, 0);
+  const total = {};
+  for (const r of rows) for (const [k, n] of Object.entries(r.counters)) total[k] = (total[k] || 0) + n;
+  const cols = [
+    ['Day', 10, (c, d) => d],
+    ['Visitors', 8, (c) => c.visitors || 0],
+    ['Visits', 6, (c) => sum(c, /^(anon|acct)_visits$/)],
+    ['Answers no acct / acct', 22, (c) => `${sum(c, /^anon_answers_/)} / ${sum(c, /^acct_answers_/)}`],
+    ['Written', 7, (c) => sum(c, /_written_/)],
+    ['Learned', 7, (c) => sum(c, /_learned_/)],
+    ['Lessons', 7, (c) => sum(c, /_lessons$/)],
+    ['Sign-ups', 8, (c) => c.signups || 0],
+    ['Logins', 6, (c) => c.logins || 0],
+    ['Active accts', 12, (c) => c.accounts || 0],
+  ];
+  const line = (c, d) => cols.map(([, w, f], i) => String(f(c, d)).padStart(i ? w : 0).padEnd(i ? 0 : w)).join('  ');
+  const out = [`Kana Dojo usage, ${from} to ${to} (UTC days). Accounts: ${accounts} in all.`, ''];
+  out.push(cols.map(([h, w], i) => (i ? h.padStart(w) : h.padEnd(w))).join('  '));
+  for (const r of rows) out.push(line(r.counters, r.day));
+  if (!rows.length) out.push('(nothing recorded yet)');
+  out.push(line(total, 'Total'));
+  out.push('', 'Visitors and active accounts in the total are summed per day, so someone who came on 3 days counts 3 times.', '');
+  out.push(['Script', 'Answers no acct / acct', 'Correct', 'Written', 'Learned', 'Drills'].map((h, i) => (i ? h.padStart(i === 1 ? 22 : 8) : h.padEnd(10))).join('  '));
+  for (const s of SCRIPTS) {
+    const a = sum(total, new RegExp(`_answers_${s}$`));
+    const ok = sum(total, new RegExp(`_correct_${s}$`));
+    out.push([
+      s.padEnd(10),
+      `${sum(total, new RegExp(`^anon_answers_${s}$`))} / ${sum(total, new RegExp(`^acct_answers_${s}$`))}`.padStart(22),
+      (a ? `${Math.round((100 * ok) / a)}%` : '-').padStart(8),
+      String(sum(total, new RegExp(`_written_${s}$`))).padStart(8),
+      String(sum(total, new RegExp(`_learned_${s}$`))).padStart(8),
+      String(sum(total, new RegExp(`_drills_${s}$`))).padStart(8),
+    ].join('  '));
+  }
+  out.push('', `Also: ${sum(total, /_workouts$/)} workouts, ${total.syncs || 0} syncs, ${total.login_failures || 0} failed sign-ins, ` +
+    `${total.password_changes || 0} password changes, ${total.accounts_deleted || 0} accounts deleted.`);
+  return out.join('\n');
 }
 
 (async () => {
@@ -85,8 +129,15 @@ async function user(name) {
       console.log(`Database copied to ${out}`);
       break;
     }
+    case 'metrics': {
+      const days = Math.max(1, Math.min(400, Number(a1) || 30));
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+      console.log(report(await store.getMetrics(from, to), await store.countUsers(), from, to));
+      break;
+    }
     default:
-      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 13).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 14).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
   }
   await store.close();
 })().catch((e) => { console.error(e.message); process.exit(1); });

@@ -32,7 +32,9 @@
   const DEFAULTS = {
     script: 'hiragana', sound: true, writeReviews: true, leniency: 'normal', varyFont: false, chartRomaji: true,
     drillLength: '5', // times each character is written in a drill: '3', '5' or '7'
-    customSet: {}, // characters picked for a custom set, per script: { hiragana: ['け', 'こ'] }
+    customSet: {},
+    // Anonymous usage counts (js/usage.js); off from the start if the browser asks not to be tracked.
+    shareUsage: !(navigator.globalPrivacyControl || navigator.doNotTrack === '1'), // characters picked for a custom set, per script: { hiragana: ['け', 'こ'] }
     kanjiLevel: 5, vocabLevel: 5, // JLPT level shown on the Kanji / Words charts
     voice: '', speechRate: '0.85', // '' = best Japanese voice available
   };

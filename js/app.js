@@ -6,6 +6,8 @@
   const app = $('#app');
   const modalRoot = $('#modal');
 
+  // Anonymous usage counts (js/usage.js); a stand-in that does nothing if it isn't loaded.
+  const U = window.Usage || { answer() {}, learned() {}, drill() {}, lesson() {}, workout() {}, visit() {} };
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -557,6 +559,7 @@
     if (sess.kind === 'review') S.grade(it.unit, it.skill, correct);
     else if (sess.kind === 'practice') S.practice(it.unit, it.skill, correct);
     else S.practice(it.word || it.unit, 'x', correct); // lesson quiz / words: activity log only
+    U.answer(scriptOf(it.unit), correct, it.skill === 'write' || it.type === 'write');
   }
 
   function endSession() {
@@ -640,6 +643,7 @@
   }
   function finishWorkout(L) {
     lesson = null;
+    U.workout();
     startSession({
       kind: 'practice', title: L.g.label,
       items: shuffle(L.g.kana.slice()).map((u) => ({ type: 'write', unit: u, skill: 'write' })),
@@ -699,7 +703,11 @@
     const soon = 'The first review comes up in about 15 minutes, then a few more today.';
     startSession({
       kind: 'quiz', title: `${g.label} lesson`, items,
-      onEnd: () => g.kana.forEach((u) => S.learn(u, skillsFor(u))),
+      onEnd: () => {
+        g.kana.filter((u) => !S.isLearned(u)).forEach((u) => U.learned(scriptOf(u)));
+        g.kana.forEach((u) => S.learn(u, skillsFor(u)));
+        U.lesson();
+      },
       endNote: fresh === g.kana.length ? `These characters are now in your reviews. ${soon}`
         : fresh ? `${fresh === 1 ? 'The new one is' : `The ${fresh} new ones are`} now in your reviews, and the others keep their timing. ${soon}`
           : 'You’d already learned all of these, so their review timing hasn’t changed.',
@@ -1027,7 +1035,7 @@
           clearTimeout(d.timer);
           d.advance = null;
           if (d.stopped) return;
-          if (last) { stopDrill(d); onDone({ clean, rounds: d.rounds.length }); return; }
+          if (last) { stopDrill(d); U.drill(scriptOf(u)); onDone({ clean, rounds: d.rounds.length }); return; }
           d.i++;
           round();
         };
@@ -1489,6 +1497,7 @@
           <select data-set="leniency">${opt('leniency', 'strict', 'Strict')}${opt('leniency', 'normal', 'Normal')}${opt('leniency', 'relaxed', 'Relaxed')}${opt('leniency', 'off', 'Off (self-check)')}</select></label>
         <label class="srow"><span>Vary fonts when reading<small>Mincho, rounded, handwritten… builds real-world recognition</small></span>${chk('varyFont')}</label>
         <label class="srow"><span>Show romaji, meanings and readings on charts</span>${chk('chartRomaji')}</label>
+        <label class="srow"><span>Share anonymous usage counts<small>Totals like characters practised, so the site’s owner can see how it’s used. No cookies, nothing that identifies you. <button type="button" class="btn link" data-act="privacy">More</button></small></span>${chk('shareUsage')}</label>
       </div>
       <p class="muted small-note">Settings apply to this device only. Progress is shared between devices when you’re signed in.</p>
       <div class="btns left"><button class="btn ghost" data-act="sources">About &amp; data sources</button>${donateHTML()}${versionHTML()}</div>
@@ -1535,11 +1544,23 @@
           after 180 days unused.</li>
         <li><b>Server logs</b> record each request’s time, network (IP) address and what it was for. They’re used
           only to stop abuse and fix problems${logDays ? `, and are deleted after ${logDays} days` : ''}.</li>
-        <li><b>No email, cookies, ads, analytics or tracking.</b> The app keeps its data in your browser’s own
+        <li><b>No email, cookies, ads or third-party tracking.</b> The app keeps its data in your browser’s own
           storage.</li>
         <li>It’s kept on the server that runs this site and isn’t sold or shared.</li>
         ${DONATE_URL ? `<li><b>Supporting the site</b> happens on ${esc(DONATE_NAME)}’s own site, under its privacy
           policy. The app only links there: nothing about it is sent to or kept by this app.</li>` : ''}
+      </ul>
+      <h3>Usage counts, with or without an account</h3>
+      <ul class="sources">
+        <li>The app sends this site’s server <b>anonymous totals</b>, such as how many characters were practised or
+          lessons finished, so its owner can see how it’s used. Nothing is stored on your device for this, and the
+          totals carry nothing that identifies you.</li>
+        <li>To count <b>visitors per day</b>, the server makes a one-way code from your network address, your
+          browser’s name and the date. It keeps that code for two days, then only the number of visitors. The code
+          changes every day, so it can’t follow anyone from one day to the next.</li>
+        <li>The server also counts sign-ups, sign-ins and syncs per day.</li>
+        <li><b>Settings → Share anonymous usage counts</b> turns the app’s totals off. They start off if your browser
+          asks sites not to track you.</li>
       </ul>
       <h3>Your choices</h3>
       <ul class="sources">
@@ -1691,6 +1712,7 @@
   });
 
   renderHome();
+  U.visit();
 
   // Expose for debugging/tests.
   window.KanaDojo = { renderHome, startLesson, startReview, startPractice, startWords, startWorkout, openDetail, get drill() { return drill; }, get sess() { return sess; }, get lesson() { return lesson; } };

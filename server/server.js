@@ -23,6 +23,7 @@ const { accounts } = require('./accounts');
 const { hashPassword, checkPassword } = require('./passwords');
 const M = require('../js/merge');
 const { appVersion } = require('./version');
+const { metrics } = require('./metrics');
 
 const arg = (name, env, def) => {
   const i = process.argv.indexOf('--' + name);
@@ -73,6 +74,7 @@ if (BASE && !/^\/[\w.-]+(\/[\w.-]+)*$/.test(BASE)) throw new Error(`--base must 
 
 const store = openStore({ kind: STORE, file: DB_FILE, project: PROJECT, database: DATABASE });
 const db = accounts(store);
+const usage = metrics(store); // daily usage totals (node server/admin.js metrics)
 const STORE_INFO = STORE === 'sqlite' ? `database: ${DB_FILE}` : `store: ${STORE} ${PROJECT || '(project from Cloud Run)'}/${DATABASE}`;
 
 // ---------------------------------------------------------------------------
@@ -230,6 +232,8 @@ function clientIp(req) {
 // API
 // ---------------------------------------------------------------------------
 const USERNAME = /^[A-Za-z0-9_.-]{3,24}$/;
+// What the app may count (js/usage.js).
+const METRIC_KEY = /^(visits|lessons|workouts|(answers|correct|written|learned|drills)_(hiragana|katakana|kanji|vocab))$/;
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 200;
 let dummyHash = null; // checked against when a username doesn't exist, so timing doesn't reveal that
@@ -273,6 +277,24 @@ async function syncProgress(userId, incoming) {
 const routes = {
   'GET /api/health': async () => ({ ok: true, signups: SIGNUPS, version: appVersion().version, build: appVersion().label }),
 
+  // Anonymous usage totals from the app (js/usage.js), split by whether the device is signed in, plus one
+  // visitor a day per address + browser (as a one-way code; see server/metrics.js).
+  'POST /api/metrics': async (req) => {
+    const ip = clientIp(req);
+    if (tooMany('metrics:' + ip, 30, 60e3)) throw new HttpError(429, 'Too many');
+    const body = await readJSON(req, 8 * 1024);
+    const counts = body.counts && typeof body.counts === 'object' && !Array.isArray(body.counts) ? body.counts : {};
+    const prefix = body.signedIn === true ? 'acct_' : 'anon_';
+    const add = {};
+    for (const [k, v] of Object.entries(counts).slice(0, 40)) {
+      const n = Math.floor(Number(v));
+      if (METRIC_KEY.test(k) && n > 0) add[prefix + k] = Math.min(n, 200); // more than a minute of real use
+    }
+    if (Object.keys(add).length) usage.add(add);
+    await usage.seen('visitors', `${ip}|${String(req.headers['user-agent'] || '').slice(0, 300)}`);
+    return { ok: true };
+  },
+
   'POST /api/signup': async (req) => {
     guardAuthAttempts(req);
     if (!SIGNUPS) throw new HttpError(403, 'New accounts are switched off on this server');
@@ -296,6 +318,7 @@ const routes = {
     }
     hit('signup:' + ip);
     hit('signup:all');
+    usage.add({ signups: 1 });
     return { status: 201, body: { username, token: await db.newSession(id) } };
   },
 
@@ -303,7 +326,11 @@ const routes = {
     guardAuthAttempts(req);
     const body = await readJSON(req);
     const user = await db.userByName(str(body.username).trim());
-    if (!(await verifyPassword(user, str(body.password)))) throw new HttpError(401, 'Wrong username or password');
+    if (!(await verifyPassword(user, str(body.password)))) {
+      usage.add({ login_failures: 1 });
+      throw new HttpError(401, 'Wrong username or password');
+    }
+    usage.add({ logins: 1 });
     return { username: user.username, token: await db.newSession(user.id) };
   },
 
@@ -327,6 +354,8 @@ const routes = {
     const body = await readJSON(req);
     if (!(Number(body.client) >= M.FORMAT)) throw new HttpError(409, 'The app was updated. Reload the page to keep syncing.');
     const progress = await syncProgress(user.id, body.progress);
+    usage.add({ syncs: 1 });
+    usage.seen('accounts', user.id).catch(() => {});
     return { format: M.FORMAT, progress, stats: M.stats(progress) };
   },
 
@@ -339,6 +368,7 @@ const routes = {
     validPassword(next);
     await db.setPassword(user.id, next);
     await db.endOtherSessions(user.id, token); // sign out other devices
+    usage.add({ password_changes: 1 });
     return { ok: true };
   },
 
@@ -348,6 +378,7 @@ const routes = {
     const body = await readJSON(req);
     if (!(await verifyPassword(user, str(body.password)))) throw new HttpError(403, 'Password is wrong');
     await db.deleteUser(user.id); // sessions, progress and snapshots go with it
+    usage.add({ accounts_deleted: 1 });
     return { ok: true };
   },
 };
@@ -409,6 +440,6 @@ setInterval(expire, 24 * 3600e3).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     server.close();
-    Promise.resolve(store.close()).finally(() => process.exit(0));
+    Promise.resolve(usage.flush()).then(() => store.close()).finally(() => process.exit(0));
   });
 }

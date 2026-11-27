@@ -71,7 +71,23 @@ node server/admin.js restore <user> <snapshot>   # put one back (devices pick it
 node server/admin.js reset-password <user>       # there's no email reset, so this is how
 node server/admin.js delete <user>
 node server/admin.js backup ~/kana-backup.db     # copy the whole database
+node server/admin.js metrics [days]              # usage over the last 30 (or [days]) days
 ```
+
+### Usage metrics
+
+`node server/admin.js metrics` (add `--firestore <project>` for the Google Cloud copy) prints daily
+visitors, visits, answers (from devices with and without an account), characters written and learned,
+lessons, sign-ups, sign-ins and active accounts, then the period by script. Nothing third-party is
+involved and no cookies are used:
+
+- The app (`js/usage.js`) keeps counts in memory and sends anonymous totals to the server about once a
+  minute. Settings → *Share anonymous usage counts* turns it off, and it starts off when the browser
+  asks not to be tracked (Global Privacy Control or Do Not Track).
+- The server counts sign-ups, sign-ins, syncs and the like itself, and adds everything to daily totals
+  about once a minute (`server/metrics.js`).
+- Daily visitors and active accounts are counted by one-way codes (a secret, the day, and the address +
+  browser or account), kept for two days, then only the numbers stay. The privacy note says all this.
 
 (Add `--db <file>` if the database isn't at `var/kana-dojo.db`.)
 
@@ -234,6 +250,7 @@ js/writer.js        handwriting pad: pointer/pen input, stroke animation, stroke
 js/srs.js           progress storage (in the browser) + spaced-repetition scheduling
 js/sync.js          accounts + syncing progress with the server
 js/merge.js         progress format and merging (shared by the browser and the server)
+js/usage.js         anonymous usage counts sent to the server (Settings can turn it off)
 js/romaji.js        answer checking (accepts shi/si, tsu/tu, っ doubling, ー long vowels…)
 js/decks.js         kanji + word decks: lessons, answer checking, choices, loading stroke data
 data/kana.js        kana tables, lesson order, practice words
@@ -247,6 +264,7 @@ server/store/       where they're kept: sqlite.js (a database file) or firestore
                     both have the same methods and pass the same tests (server/test/store.test.js)
 server/passwords.js password hashing (scrypt)
 server/version.js   the app's version, and how a git checkout differs from that release
+server/metrics.js   usage totals: gathered in memory, added to the store about once a minute
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
 server/test/        tests: `npm test` (SQLite); `npm run test:firestore -- <project> <database>` (and Firestore)
 Dockerfile          the Cloud Run image (Firestore store)

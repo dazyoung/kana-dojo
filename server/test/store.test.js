@@ -16,6 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { openStore } = require('../store');
 const { accounts } = require('../accounts');
+const { metrics } = require('../metrics');
 const { checkPassword } = require('../passwords');
 const M = require('../../js/merge');
 
@@ -27,22 +28,41 @@ const BACKENDS = [{
 const RUN = crypto.randomBytes(3).toString('hex');
 let opened = 0;
 if (process.env.KANA_TEST_FIRESTORE_PROJECT) {
-  BACKENDS.push({ name: `firestore (${process.env.KANA_TEST_FIRESTORE_PROJECT})`, open: () => wiping(openStore({
-    kind: 'firestore', project: process.env.KANA_TEST_FIRESTORE_PROJECT, database: process.env.KANA_TEST_FIRESTORE_DB || '(default)',
-    prefix: `test-${RUN}-${++opened}-`, partSize: 20000,
-  })) });
+  BACKENDS.push({ name: `firestore (${process.env.KANA_TEST_FIRESTORE_PROJECT})`, open: () => {
+    const prefix = `test-${RUN}-${++opened}-`;
+    return wiping(openStore({
+      kind: 'firestore', project: process.env.KANA_TEST_FIRESTORE_PROJECT, database: process.env.KANA_TEST_FIRESTORE_DB || '(default)',
+      prefix, partSize: 20000,
+    }), prefix);
+  } });
 } else if (process.env.FIRESTORE_EMULATOR_HOST) {
   // A project of its own for each test. Small parts, so splitting large progress gets tested too.
   BACKENDS.push({ name: 'firestore (emulator)', open: () => openStore({ kind: 'firestore', project: `kana-test-${RUN}-${++opened}`, partSize: 20000 }) });
 }
-// Closing the store deletes every account left in it (and with them, everything they own).
-function wiping(store) {
+// Closing the store deletes every account left in it (and with them, everything they own), and the usage
+// totals and secrets the tests made.
+function wiping(store, prefix) {
   const close = store.close;
   store.close = async () => {
     for (const u of await store.listUsers()) await store.deleteUser(u.id);
+    await deleteDocs(prefix, [
+      ...['2026-11-26', '2026-11-27', '2026-11-28'].flatMap((d) => [`metrics/${d}`, `metrics/${d}/seen/visitors`, `metrics/${d}/seen/accounts`]),
+      'secrets/metrics', 'secrets/other',
+    ]);
     return close();
   };
   return store;
+}
+async function deleteDocs(prefix, paths) {
+  const { execFileSync } = require('node:child_process');
+  const token = execFileSync('gcloud', ['auth', 'print-access-token']).toString().trim();
+  const root = `projects/${process.env.KANA_TEST_FIRESTORE_PROJECT}/databases/${process.env.KANA_TEST_FIRESTORE_DB || '(default)'}/documents`;
+  const r = await fetch(`https://firestore.googleapis.com/v1/${root}:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ writes: paths.map((p) => ({ delete: `${root}/${prefix}${p}` })) }),
+  });
+  if (!r.ok) throw new Error(`cleaning up: ${r.status} ${await r.text()}`);
 }
 
 // A fresh store and accounts with a clock the test moves by hand.
@@ -268,6 +288,57 @@ for (const b of BACKENDS) {
       await store.close();
     });
 
+    it('keeps daily usage totals, counting each one-way code once a day', async () => {
+      const { store } = setup(b);
+      await store.addMetrics('2026-11-26', { anon_visits: 2, logins: 1 }, { visitors: ['a', 'b'] });
+      await store.addMetrics('2026-11-26', { anon_visits: 1 }, { visitors: ['b', 'c'], accounts: ['x'] });
+      await store.addMetrics('2026-11-27', { signups: 1 }, { visitors: ['a'] });
+      assert.deepEqual(await store.getMetrics('2026-11-25', '2026-11-28'), [
+        { day: '2026-11-26', counters: { anon_visits: 3, logins: 1, visitors: 3, accounts: 1 } },
+        { day: '2026-11-27', counters: { signups: 1, visitors: 1 } },
+      ]);
+      assert.deepEqual(await store.getMetrics('2026-11-27', '2026-11-27'), [{ day: '2026-11-27', counters: { signups: 1, visitors: 1 } }]);
+      // Forgetting a day's codes keeps its totals (and the same code then counts again).
+      await store.forgetSeen('2026-11-27');
+      await store.addMetrics('2026-11-26', {}, { visitors: ['a'] });
+      await store.addMetrics('2026-11-27', {}, { visitors: ['a'] });
+      const rows = await store.getMetrics('2026-11-26', '2026-11-27');
+      assert.equal(rows[0].counters.visitors, 4);
+      assert.equal(rows[1].counters.visitors, 1);
+      await store.close();
+    });
+
+    it('keeps a secret once made', async () => {
+      const { store } = setup(b);
+      const s = await store.secret('metrics');
+      assert.match(s, /^[0-9a-f]{64}$/);
+      assert.equal(await store.secret('metrics'), s);
+      assert.notEqual(await store.secret('other'), s);
+      await store.close();
+    });
+
+    it('gathers usage in memory and writes it as daily totals', async () => {
+      const { store, clock } = setup(b);
+      const m = metrics(store, { now: () => clock.t });
+      m.add({ logins: 1, anon_visits: 2 });
+      await m.seen('visitors', '1.2.3.4|Safari');
+      await m.seen('visitors', '1.2.3.4|Safari');
+      await m.seen('visitors', '5.6.7.8|Chrome');
+      await m.seen('accounts', 'user-1');
+      clock.t += 61e3; // a minute on: the next count writes everything
+      m.add({ logins: 1 });
+      await m.flush();
+      let rows = await store.getMetrics('2026-11-27', '2026-11-27');
+      assert.deepEqual(rows[0].counters, { logins: 2, anon_visits: 2, visitors: 2, accounts: 1 });
+      clock.t += 864e5; // the next day the same visitor counts again
+      await m.seen('visitors', '1.2.3.4|Safari');
+      await m.flush();
+      rows = await store.getMetrics('2026-11-28', '2026-11-28');
+      assert.deepEqual(rows[0].counters, { visitors: 1 });
+      assert.equal(await store.countUsers(), 0);
+      await store.close();
+    });
+
     it('lists accounts with their progress', async () => {
       const { a, store, clock } = setup(b);
       const one = await a.createUser('one', 'password123');
@@ -280,6 +351,7 @@ for (const b of BACKENDS) {
       assert.deepEqual(Object.keys(rows[0].progress.cards), ['あ|read']);
       assert.equal(rows[1].progress, null);
       assert.equal(rows[1].updated, null);
+      assert.equal(await store.countUsers(), 2);
       await store.close();
     });
   });

@@ -6,6 +6,7 @@
 //
 // User ids are strings. Times are milliseconds since 1970. Progress is a plain object (see js/merge.js).
 'use strict';
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -55,6 +56,23 @@ function open(file) {
       data    TEXT NOT NULL,
       PRIMARY KEY (user_id, label)
     );
+    -- Usage metrics: daily totals, and the day's one-way visitor codes (kept two days; see server/metrics.js).
+    CREATE TABLE IF NOT EXISTS metrics (
+      day TEXT NOT NULL,
+      key TEXT NOT NULL,
+      n   INTEGER NOT NULL,
+      PRIMARY KEY (day, key)
+    );
+    CREATE TABLE IF NOT EXISTS metric_seen (
+      day  TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      PRIMARY KEY (day, kind, hash)
+    );
+    CREATE TABLE IF NOT EXISTS secrets (
+      name  TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   const q = {
@@ -79,6 +97,14 @@ function open(file) {
       (SELECT label FROM snapshots WHERE user_id = ? ORDER BY label DESC LIMIT ?)`),
     listSnapshots: db.prepare('SELECT label, data FROM snapshots WHERE user_id = ? ORDER BY label DESC'),
     getSnapshot: db.prepare('SELECT data FROM snapshots WHERE user_id = ? AND label = ?'),
+    countUsers: db.prepare('SELECT COUNT(*) AS n FROM users'),
+    addMetric: db.prepare(`INSERT INTO metrics (day, key, n) VALUES (?, ?, ?)
+      ON CONFLICT(day, key) DO UPDATE SET n = n + excluded.n`),
+    addSeen: db.prepare('INSERT OR IGNORE INTO metric_seen (day, kind, hash) VALUES (?, ?, ?)'),
+    getMetrics: db.prepare('SELECT day, key, n FROM metrics WHERE day >= ? AND day <= ? ORDER BY day'),
+    forgetSeen: db.prepare('DELETE FROM metric_seen WHERE day < ?'),
+    getSecret: db.prepare('SELECT value FROM secrets WHERE name = ?'),
+    addSecret: db.prepare('INSERT OR IGNORE INTO secrets (name, value) VALUES (?, ?)'),
   };
 
   const user = (r) => (r ? { id: String(r.id), username: r.username, pass: r.pass, created: r.created } : null);
@@ -160,6 +186,44 @@ function open(file) {
     async getSnapshot(userId, label) {
       const r = q.getSnapshot.get(uid(userId), label);
       return r ? JSON.parse(r.data) : null;
+    },
+
+    async countUsers() { return q.countUsers.get().n; },
+
+    // ---------- usage metrics (see server/metrics.js) ----------
+    // Add to a day's totals. `seen` is { kind: [one-way codes] }: codes not seen that day before are kept, and
+    // the day's `kind` total goes up by how many were new.
+    async addMetrics(day, counters, seen = {}) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const add = { ...counters };
+        for (const [kind, hashes] of Object.entries(seen)) {
+          let fresh = 0;
+          for (const h of hashes) fresh += Number(q.addSeen.run(day, kind, h).changes);
+          if (fresh) add[kind] = (add[kind] || 0) + fresh;
+        }
+        for (const [k, n] of Object.entries(add)) if (n) q.addMetric.run(day, k, n);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
+    // [{ day, counters }] for the days from..to (as 'YYYY-MM-DD') that have any, oldest first.
+    async getMetrics(from, to) {
+      const out = new Map();
+      for (const r of q.getMetrics.all(from, to)) {
+        if (!out.has(r.day)) out.set(r.day, {});
+        out.get(r.day)[r.key] = r.n;
+      }
+      return [...out].map(([day, counters]) => ({ day, counters }));
+    },
+    // Drop the one-way codes of days before `day`; their totals stay.
+    async forgetSeen(day) { q.forgetSeen.run(day); },
+    // A random value made once and kept (e.g. what visitor codes are made with).
+    async secret(name) {
+      q.addSecret.run(name, crypto.randomBytes(32).toString('hex'));
+      return q.getSecret.get(name).value;
     },
 
     // A consistent copy of the whole database, as another SQLite file.
