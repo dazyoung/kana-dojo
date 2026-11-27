@@ -101,13 +101,15 @@ function open({ project, database = '(default)', prefix = '', partSize = PART } 
     if (!projectId) throw new Error('Firestore needs a project (--project or GOOGLE_CLOUD_PROJECT)');
     return `projects/${projectId}/databases/${database}/documents`;
   }
-  let ROOT = null;
+  // Known at once when the project is given; on Cloud Run without one, looked up before the first call.
+  let ROOT = projectId ? `projects/${projectId}/databases/${database}/documents` : null;
+  const ready = async () => { if (!ROOT) ROOT = await root(); };
   // A document's full name; the first segment is a top-level collection, which gets the prefix.
   const name = (collection, ...rest) => `${ROOT}/${[prefix + collection, ...rest].join('/')}`;
 
   // ---------- requests ----------
   async function call(method, pathAndQuery, body) {
-    if (!ROOT) ROOT = await root();
+    await ready();
     for (let attempt = 1; ; attempt++) {
       const r = await fetch(`${host}/v1/${pathAndQuery.replace('{root}', ROOT)}`, {
         method,
@@ -216,7 +218,7 @@ function open({ project, database = '(default)', prefix = '', partSize = PART } 
   const user = (id, f) => (f ? { id, username: f.username, pass: f.pass, created: f.created } : null);
   const idOf = (n) => n.slice(n.lastIndexOf('/') + 1);
 
-  return {
+  const store = {
     kind: 'firestore',
 
     // ---------- users ----------
@@ -355,6 +357,11 @@ function open({ project, database = '(default)', prefix = '', partSize = PART } 
 
     async close() {},
   };
+  // Every method builds document names, so the project must be known before any of them runs.
+  for (const [k, f] of Object.entries(store)) {
+    if (typeof f === 'function') store[k] = async (...args) => { await ready(); return f(...args); };
+  }
+  return store;
 }
 
 module.exports = { open };

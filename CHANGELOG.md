@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- Fix: the Firestore store wrote to `null/...` before it had worked out the project's path (found by the
+  first test run against real Firestore; nothing was deployed).
 - `tools/gcp-setup.sh` makes the backup bucket through the Cloud Storage API, since `gcloud storage` crashes
   when gcloud runs on Python 3.14.
 
