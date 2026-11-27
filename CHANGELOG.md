@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+## 0.4.0 (2026-11-27)
+
 - Version numbers. The version shows at the bottom of the home page and in Settings, and at `/api/health`.
   A copy running from a git checkout with unreleased changes shows that too, e.g. `0.4.0+dev.1a2b3c4`.
 - This changelog, and `npm version` to make a release.
