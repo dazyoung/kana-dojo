@@ -1,11 +1,13 @@
 // Accounts + syncing progress with the Kana Dojo server (server/server.js).
 //
 // Progress always lives in this browser first, so the app works offline and without an account.
-// When signed in, every change is sent to the server a moment later; the server merges it with
-// what other devices sent (see merge.js) and sends back the combined progress.
+// When signed in, changes are sent to the server within SYNC_AFTER (and straight away when the app is
+// hidden or closed); the server merges them with what other devices sent (see merge.js) and sends back
+// the combined progress. Each sync carries the whole progress, so they're batched rather than per answer.
 (function () {
   const S = window.SRS, M = window.KanaMerge;
   const ACC_KEY = 'kana-dojo-account';
+  const SYNC_AFTER = 20e3;
 
   const read = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   let acc = read(ACC_KEY) || {}; // { username, token, lastSync, dirty }
@@ -52,21 +54,24 @@
   }
 
   // ---------- syncing ----------
-  let changes = 0, running = null, timer = null;
-  const schedule = (ms) => { clearTimeout(timer); timer = setTimeout(sync, ms); };
+  let changes = 0, running = null, timer = null, timerAt = 0;
+  const stopTimer = () => { clearTimeout(timer); timer = null; timerAt = 0; };
+  const schedule = (ms) => { stopTimer(); timerAt = Date.now() + ms; timer = setTimeout(sync, ms); };
+  // Sync within `ms`, unless one is already due sooner.
+  const within = (ms) => { if (!timerAt || timerAt > Date.now() + ms) schedule(ms); };
 
   S.onChange = () => {
     changes++;
     if (!acc.token) return;
     acc.dirty = true;
     saveAcc();
-    schedule(2000);
+    within(SYNC_AFTER);
   };
 
   function sync() {
     if (!acc.token) return Promise.resolve();
     if (running) return running;
-    clearTimeout(timer);
+    stopTimer();
     running = (async () => {
       const seen = changes;
       setStatus('syncing');
@@ -82,7 +87,7 @@
         saveAcc();
         setStatus('ok');
         if (changed) emit('progress');
-        if (acc.dirty) schedule(1000);
+        if (acc.dirty) within(SYNC_AFTER);
       } catch (e) {
         if (e.status === 401) {
           acc.token = null; // keep the username: this device's progress still belongs to them
@@ -137,7 +142,7 @@
     if (acc.token && acc.dirty &&
       !confirm('Some progress on this device hasn’t reached the server yet and will be lost. Sign out anyway?')) return false;
     if (acc.token) api('logout', {}).catch(() => {});
-    clearTimeout(timer);
+    stopTimer();
     acc = {};
     saveAcc();
     S.replaceProgress(M.empty(Date.now()));
@@ -151,7 +156,7 @@
 
   async function deleteAccount(password) {
     await api('delete-account', { password });
-    clearTimeout(timer);
+    stopTimer();
     acc = {}; // progress stays on this device, no longer linked to an account
     saveAcc();
     setStatus('off');
@@ -169,6 +174,7 @@
       if (document.hidden) { if (acc.dirty) sync(); } // send before the app goes into the background
       else if (Date.now() - (acc.lastSync || 0) > 15e3) sync();
     });
+    window.addEventListener('pagehide', () => { if (acc.token && acc.dirty) sync(); }); // closing the tab
     window.addEventListener('online', () => { if (acc.token) sync(); });
     setInterval(() => { if (acc.token && !document.hidden) sync(); }, 5 * 60e3);
   } else {

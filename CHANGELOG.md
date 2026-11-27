@@ -16,6 +16,14 @@ into the next release, commits it and tags it (see README → Versions and relea
   A copy running from a git checkout with unreleased changes shows that too, e.g. `0.4.0+dev.1a2b3c4`.
 - This changelog, and `npm version` to make a release.
 - The `?v=` on the page's files now comes from the version automatically (no more manual bumps).
+- A privacy note (Settings → Privacy, and from the sign-up form): what's stored and why, and how to export
+  or delete it. The server's `--contact` and `--log-days` fill in who to ask and how long logs are kept.
+- Limits on new accounts: 5 per network address and 200 in all (`KANA_SIGNUPS_PER_DAY`) each day.
+- An account's stored progress is capped at 4 MB (everything learned is about 3 MB).
+- Syncing sends changes within 20 seconds instead of after every answer, and straight away when the app
+  is hidden or closed. Sync replies are gzipped (about 5× smaller).
+- `--trust-proxy` now takes the number of proxies in front of the server, and the client's address is
+  read from the end of `X-Forwarded-For`, where a client can't fake it.
 
 ## 0.3.0 (2026-11-27)
 

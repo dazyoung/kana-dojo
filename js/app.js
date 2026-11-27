@@ -1354,13 +1354,15 @@
           <button class="btn" data-act="sync-now">Sync now</button>
           <button class="btn" data-act="change-password">Password…</button>
           <button class="btn" data-act="sign-out">Sign out</button>
+          <button class="btn link" data-act="privacy">Privacy</button>
         </div>`;
     }
     return `<h3>Account</h3>
       <p class="muted">${Y.username
         ? `You were signed out of <b>${esc(Y.username)}</b>. Sign in again to keep syncing.`
         : 'Sign in to keep your progress in sync on all your devices.'}</p>
-      <div class="btns left"><button class="btn primary" data-act="account">${Y.username ? 'Sign in' : 'Sign in or create an account'}</button></div>`;
+      <div class="btns left"><button class="btn primary" data-act="account">${Y.username ? 'Sign in' : 'Sign in or create an account'}</button>
+        <button class="btn link" data-act="privacy">Privacy</button></div>`;
   }
 
   function openAccount(mode) {
@@ -1379,7 +1381,7 @@
           required minlength="3" maxlength="24" value="${esc(Y.username || '')}"></label>
         <label>Password<input name="password" type="password" autocomplete="${create ? 'new-password' : 'current-password'}"
           required ${create ? 'minlength="8"' : ''} maxlength="200"></label>
-        ${create ? '<small class="muted">At least 8 characters. There’s no email reset, so use one you’ll remember (or a password manager).</small>' : ''}
+        ${create ? '<small class="muted">At least 8 characters. There’s no email reset, so use one you’ll remember (or a password manager). <button type="button" class="btn link" data-act="privacy">What’s stored</button></small>' : ''}
         ${carry}
         <div class="auth-err" aria-live="polite"></div>
         <button class="btn primary wide" type="submit">${create ? 'Create account' : 'Sign in'}</button>
@@ -1506,6 +1508,37 @@
 
   const VOICE_SAMPLE = 'こんにちは。日本語を勉強しています。';
 
+  // What the server stores and why. The contact and how long logs are kept come from the server's settings.
+  function openPrivacy() {
+    const site = document.querySelector('meta[name="site"]');
+    const contact = site ? site.dataset.contact : '';
+    const logDays = site ? Number(site.dataset.logDays) : 0;
+    modal(`
+      <h2>Privacy</h2>
+      <p>Kana Dojo works without an account. Your progress then stays in this browser, and nothing about you is
+        sent anywhere.</p>
+      <h3>If you create an account</h3>
+      <ul class="sources">
+        <li><b>What’s stored:</b> your username; your password as a one-way scrambled hash, never the password
+          itself; your progress (the cards you’ve studied, when and how you answered, and answers per day), with up
+          to 40 earlier copies so it can be recovered; and a sign-in code for each device you use, which expires
+          after 180 days unused.</li>
+        <li><b>Server logs</b> record each request’s time, network (IP) address and what it was for. They’re used
+          only to stop abuse and fix problems${logDays ? `, and are deleted after ${logDays} days` : ''}.</li>
+        <li><b>No email, cookies, ads, analytics or tracking.</b> The app keeps its data in your browser’s own
+          storage.</li>
+        <li>It’s kept on the server that runs this site and isn’t sold or shared.</li>
+      </ul>
+      <h3>Your choices</h3>
+      <ul class="sources">
+        <li><b>Export</b> (Settings → Backup) saves a copy of your progress as a file.</li>
+        <li><b>Delete my account</b> (Settings → Password…) removes your account, progress, earlier copies and
+          sign-ins from the server for good.</li>
+        <li><b>Sign out</b> removes your progress from that device. It stays in your account.</li>
+      </ul>
+      ${contact ? `<p>Questions or requests: <a href="mailto:${esc(contact)}">${esc(contact)}</a></p>` : ''}`);
+  }
+
   function openSources() {
     modal(`
       <h2>About &amp; data sources</h2>
@@ -1523,7 +1556,8 @@
           the JLPT has not published lists since 2010.</li>
         <li><b>JLPT ↔ CEFR</b>: approximate, based on the official
           <a href="https://www.jlpt.jp/e/about/cefr_reference.html" target="_blank" rel="noopener">CEFR reference levels</a> (jlpt.jp).</li>
-      </ul>`);
+      </ul>
+      <div class="btns left"><button class="btn link" data-act="privacy">Privacy</button>${versionHTML()}</div>`);
   }
 
   function exportProgress() {
@@ -1547,6 +1581,7 @@
       case 'script': S.set('script', b.dataset.s); renderHome(); break;
       case 'level': S.set(levelKey(S.settings.script), Number(b.dataset.l)); renderHome(); break;
       case 'sources': openSources(); break;
+      case 'privacy': openPrivacy(); break;
       case 'voice-test': speak(VOICE_SAMPLE, true); break;
       case 'review': startReview(); break;
       case 'practice': startPractice(b.dataset.skill); break;

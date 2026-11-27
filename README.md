@@ -30,7 +30,10 @@ Server options (each can also be set with the environment variable shown):
 | `--db` | `KANA_DB` | `var/kana-dojo.db` | the database (created on first run) |
 | `--base` | `KANA_BASE` | none | also serve the app under a path, e.g. `/kana` when a reverse proxy publishes it at `https://example.com/kana` |
 | `--signups` | `KANA_SIGNUPS` | `open` | `closed` stops new accounts |
-| `--trust-proxy` | `TRUST_PROXY` | off | `1` = take the client address from `X-Forwarded-For` (a proxy on the same machine is trusted automatically) |
+| `--trust-proxy` | `TRUST_PROXY` | `0` | how many proxies in front of the server add to `X-Forwarded-For` (e.g. `1`); the client's address is taken that many entries from the end. A proxy on the same machine counts as one automatically |
+| `--contact` | `KANA_CONTACT` | none | an email address for questions, shown in the privacy note |
+| `--log-days` | `KANA_LOG_DAYS` | none | how long the server's logs are kept, shown in the privacy note (set it to match your log rotation) |
+| | `KANA_SIGNUPS_PER_DAY` | `200` | new accounts allowed per day in all (and 5 per network address) |
 
 ## Accounts and syncing
 
@@ -38,8 +41,9 @@ Open Settings → **Sign in or create an account**. Progress already on the devi
 account. Sign in with the same account on each device (computer, tablet, phone) and they share progress.
 
 - Progress is kept in the browser first, so the app works offline and without an account. When you're
-  signed in, each answer is sent to the server a couple of seconds later, and other devices pick it up
-  when they're opened or every few minutes (Settings → Sync now forces it).
+  signed in, your answers are sent to the server within about 20 seconds (and straight away when you
+  switch away from the app or close it), and other devices pick them up when they're opened or every few
+  minutes (Settings → Sync now forces it).
 - If two devices change the same card, the newer change wins. Daily answer counts and streaks add up
   across devices.
 - **Reset** and **Import** apply to every device on the account.
@@ -73,10 +77,12 @@ node server/admin.js backup ~/kana-backup.db     # copy the whole database
   `--trust-proxy 1` if the proxy runs on another machine.
 - `--signups closed` makes it invite-only: create the accounts, then close sign-ups.
 - Already in place: scrypt password hashing, rate limiting and lockout after repeated wrong passwords,
-  revocable sessions, strict security headers (CSP), and only the app's own files are ever served
-  (never the database or the server code).
-- Still to add before opening it to the public: email (for password resets), a privacy note, and
-  scheduled database backups.
+  limits on new accounts (5 per network address and `KANA_SIGNUPS_PER_DAY` in all, each day) and on how
+  much progress an account can store, revocable sessions, strict security headers (CSP), a privacy note
+  (Settings → Privacy; set `--contact` and `--log-days` for it), and only the app's own files are ever
+  served (never the database or the server code).
+- Not included: email (so no password-reset emails; `node server/admin.js reset-password` instead).
+  Schedule database backups yourself.
 
 ## How to use it (the method)
 

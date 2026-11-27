@@ -3,9 +3,10 @@
 // No dependencies, just Node 22+.
 //
 //   node server/server.js [--port 8000] [--host ::] [--db var/kana-dojo.db] [--signups open|closed]
-//                         [--base /kana] [--trust-proxy 1]
+//                         [--base /kana] [--trust-proxy 1] [--contact you@example.com] [--log-days 30]
 //
-// (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE, TRUST_PROXY.)
+// (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE,
+// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS.)
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -26,7 +27,16 @@ const PORT = Number(arg('port', 'PORT', 8000));
 const HOST = arg('host', 'HOST', undefined); // default: every interface, IPv4 and IPv6
 const DB_FILE = path.resolve(ROOT, arg('db', 'KANA_DB', path.join('var', 'kana-dojo.db')));
 const SIGNUPS = arg('signups', 'KANA_SIGNUPS', 'open') !== 'closed';
-const TRUST_PROXY = arg('trust-proxy', 'TRUST_PROXY', '') === '1';
+// How many proxies in front of the server add to X-Forwarded-For: the client's address is that many
+// entries from the end (earlier entries come from the client and can't be trusted). 0 = no proxy.
+const TRUST_PROXY = Math.max(0, Math.floor(Number(arg('trust-proxy', 'TRUST_PROXY', 0)) || 0));
+// Shown in the privacy note: who to contact, and how long server logs are kept (both optional).
+const CONTACT = String(arg('contact', 'KANA_CONTACT', '')).trim();
+const LOG_DAYS = Math.max(0, Math.floor(Number(arg('log-days', 'KANA_LOG_DAYS', 0)) || 0));
+// New accounts allowed per network address, and in all, each day.
+const SIGNUPS_PER_IP = 5;
+const SIGNUPS_PER_DAY = Math.max(1, Math.floor(Number(process.env.KANA_SIGNUPS_PER_DAY) || 200));
+const MAX_PROGRESS = 4 * 1024 * 1024; // bytes of stored progress per account (a learner who knows everything has ~3 MB)
 // Also serve the app under this path (e.g. /kana, when a reverse proxy publishes it at
 // https://example.com/kana). The app still answers at / too.
 const BASE = String(arg('base', 'KANA_BASE', '')).replace(/\/+$/, '');
@@ -45,13 +55,15 @@ const SECURITY_HEADERS = {
 };
 
 function sendJSON(res, status, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(status, {
-    ...SECURITY_HEADERS,
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store',
-  });
+  let body = Buffer.from(JSON.stringify(obj));
+  const headers = { ...SECURITY_HEADERS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
+  // Bigger replies (synced progress) are gzipped when the browser accepts it: progress shrinks ~5x.
+  if (body.length > 1024 && /\bgzip\b/.test((res.req && res.req.headers['accept-encoding']) || '')) {
+    body = zlib.gzipSync(body);
+    headers['Content-Encoding'] = 'gzip';
+    headers.Vary = 'Accept-Encoding';
+  }
+  res.writeHead(status, { ...headers, 'Content-Length': body.length });
   res.end(body);
 }
 
@@ -104,7 +116,8 @@ function indexHtml() {
   const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return fs.readFileSync(INDEX, 'utf8')
     .replace(/\?v=dev\b/g, '?v=' + encodeURIComponent(v.label))
-    .replace('</head>', `  <meta name="app-version" content="${attr(v.label)}" data-note="${attr(v.note)}">\n</head>`);
+    .replace('</head>', `  <meta name="app-version" content="${attr(v.label)}" data-note="${attr(v.note)}">\n` +
+      `  <meta name="site" data-contact="${attr(CONTACT)}" data-log-days="${LOG_DAYS || ''}">\n</head>`);
 }
 
 function serveStatic(req, res, p) {
@@ -162,16 +175,21 @@ const recentHits = (key, windowMs) => (hits.get(key) || []).filter((t) => Date.n
 function hit(key) { const a = hits.get(key) || []; a.push(Date.now()); hits.set(key, a.slice(-200)); }
 function tooMany(key, max, windowMs) { hit(key); return recentHits(key, windowMs).length > max; }
 function clearHits(key) { hits.delete(key); }
+const DAY = 24 * 3600e3;
 setInterval(() => {
   const now = Date.now();
-  for (const [k, ts] of hits) if (!ts.some((t) => now - t < 3600e3)) hits.delete(k);
+  for (const [k, ts] of hits) if (!ts.some((t) => now - t < DAY)) hits.delete(k);
 }, 600e3).unref();
 
-// Behind a reverse proxy on this machine, the proxy says who the real client is.
+// Behind a reverse proxy, the proxy says who the real client is: the last address in X-Forwarded-For is
+// the one the nearest proxy saw (anything before it could have been sent by the client itself). A proxy on
+// this machine counts as one proxy without --trust-proxy.
 const LOOPBACK = /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/;
-const clientIp = (req) => ((TRUST_PROXY || LOOPBACK.test(req.socket.remoteAddress || '')) && req.headers['x-forwarded-for']
-  ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
-  : req.socket.remoteAddress) || '?';
+function clientIp(req) {
+  const hops = TRUST_PROXY || (LOOPBACK.test(req.socket.remoteAddress || '') ? 1 : 0);
+  const xff = hops && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').map((s) => s.trim()) : [];
+  return (xff.length >= hops && xff[xff.length - hops]) || req.socket.remoteAddress || '?';
+}
 
 // ---------------------------------------------------------------------------
 // API
@@ -215,6 +233,7 @@ function syncProgress(userId, incoming) {
     const raw = db.getProgress(userId);
     const stored = M.clean(raw);
     const merged = M.merge(stored, M.clean(incoming));
+    if (Buffer.byteLength(JSON.stringify(merged)) > MAX_PROGRESS) throw new HttpError(413, 'Too much progress to store');
     if (!raw || !M.same(merged, stored)) db.putProgress(userId, merged, raw && stored);
     return merged;
   });
@@ -226,6 +245,13 @@ const routes = {
   'POST /api/signup': async (req) => {
     guardAuthAttempts(req);
     if (!SIGNUPS) throw new HttpError(403, 'New accounts are switched off on this server');
+    const ip = clientIp(req);
+    if (recentHits('signup:' + ip, DAY).length >= SIGNUPS_PER_IP) {
+      throw new HttpError(429, 'Too many new accounts from your network today. Try again tomorrow.');
+    }
+    if (recentHits('signup:all', DAY).length >= SIGNUPS_PER_DAY) {
+      throw new HttpError(429, 'No more new accounts can be made today. Try again tomorrow.');
+    }
     const body = await readJSON(req);
     const username = str(body.username).trim();
     const password = str(body.password);
@@ -235,6 +261,8 @@ const routes = {
     const hash = await hashPassword(password);
     let id;
     try { id = db.addUser(username, hash); } catch (e) { throw new HttpError(409, 'That username is taken'); }
+    hit('signup:' + ip);
+    hit('signup:all');
     return { status: 201, body: { username, token: db.newSession(id) } };
   },
 
