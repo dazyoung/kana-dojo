@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// `npm run test:firestore -- <project>`: runs the store tests against SQLite and against Firestore in that
-// Google Cloud project (the staging one), using collections of their own that they delete afterwards.
+// `npm run test:firestore -- <project> [database]`: runs the store tests against SQLite and against that
+// Firestore database (the staging one; default: "(default)"), in collections of their own that they delete afterwards.
 // The deploy script runs this first and stops if anything fails.
 //
 // `npm run test:firestore` with no project starts the local Firestore emulator instead and stops it after.
@@ -21,9 +21,9 @@ function runTests(env) {
 }
 
 (async () => {
-  const project = process.argv[2];
+  const [project, database = '(default)'] = process.argv.slice(2);
   if (project) {
-    runTests({ KANA_TEST_FIRESTORE_PROJECT: project }).on('exit', (code) => process.exit(code === null ? 1 : code));
+    runTests({ KANA_TEST_FIRESTORE_PROJECT: project, KANA_TEST_FIRESTORE_DB: database }).on('exit', (code) => process.exit(code === null ? 1 : code));
     return;
   }
   const log = [];

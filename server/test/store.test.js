@@ -2,7 +2,7 @@
 // (a server on its own machine) and the Firestore store (Google Cloud) behave the same.
 //
 //   npm test                              SQLite only
-//   npm run test:firestore -- <project>   SQLite, and Firestore in that Google Cloud project (the staging one)
+//   npm run test:firestore -- <project> [database]   SQLite, and Firestore in that project (the staging database)
 //   npm run test:firestore                SQLite, and the local Firestore emulator (needs Java)
 //
 // Against a real project every test keeps to collections with its own prefix (test-<run>-<n>-), and
@@ -28,7 +28,8 @@ const RUN = crypto.randomBytes(3).toString('hex');
 let opened = 0;
 if (process.env.KANA_TEST_FIRESTORE_PROJECT) {
   BACKENDS.push({ name: `firestore (${process.env.KANA_TEST_FIRESTORE_PROJECT})`, open: () => wiping(openStore({
-    kind: 'firestore', project: process.env.KANA_TEST_FIRESTORE_PROJECT, prefix: `test-${RUN}-${++opened}-`, partSize: 20000,
+    kind: 'firestore', project: process.env.KANA_TEST_FIRESTORE_PROJECT, database: process.env.KANA_TEST_FIRESTORE_DB || '(default)',
+    prefix: `test-${RUN}-${++opened}-`, partSize: 20000,
   })) });
 } else if (process.env.FIRESTORE_EMULATOR_HOST) {
   // A project of its own for each test. Small parts, so splitting large progress gets tested too.

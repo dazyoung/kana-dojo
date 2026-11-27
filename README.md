@@ -34,6 +34,9 @@ Server options (each can also be set with the environment variable shown):
 | `--contact` | `KANA_CONTACT` | none | an email address for questions, shown in the privacy note |
 | `--log-days` | `KANA_LOG_DAYS` | none | how long the server's logs are kept, shown in the privacy note (set it to match your log rotation) |
 | | `KANA_SIGNUPS_PER_DAY` | `200` | new accounts allowed per day in all (and 5 per network address) |
+| `--store` | `KANA_STORE` | `sqlite` | `firestore` keeps accounts in Firestore instead of `--db` (see Hosting on Google Cloud) |
+| `--project` | `GOOGLE_CLOUD_PROJECT` | none | the Google Cloud project, with `--store firestore` (found automatically on Cloud Run) |
+| `--database` | `KANA_FIRESTORE_DB` | `(default)` | which Firestore database in that project |
 
 ## Accounts and syncing
 
@@ -175,19 +178,21 @@ write it), because recognising a character and producing it are different skills
 ## Hosting on Google Cloud
 
 A public copy can run on Cloud Run, with accounts and progress in Firestore (`--store firestore`). It sleeps
-when nobody's using it, so small sites cost next to nothing. Two projects keep releases honest: each one goes
-to **staging** first, and the same image is then promoted to the **public** site.
+when nobody's using it, so small sites cost next to nothing. Each release goes to **staging** first, and the
+same image is then promoted to the **public** site. Both live in one Google Cloud project but share nothing
+else: each has its own Cloud Run service, Firestore database and service account (which can only reach its
+own database).
 
-1. Create two Google Cloud projects (staging and public) and link both to a billing account.
+1. Create a Google Cloud project and link it to a billing account.
 2. Copy `tools/gcp.env.example` to `local/gcp.env` (never committed) and fill it in.
-3. Sign in (`gcloud auth login`), then run `tools/gcp-setup.sh` once. In each project it sets up Firestore
-   in your region (sign-ins deleted when they expire, daily backups kept a week) and an account for the app
-   that may only use Firestore. It also adds the image registry, a backup bucket and a budget alert.
-4. Make a release (below), then `tools/deploy.sh v1.0.0`. That runs the tests against SQLite and the
-   staging Firestore, builds the image from the tag, deploys it to staging and checks the version it
-   reports. Try it at the staging address it prints.
-5. `tools/deploy.sh --promote v1.0.0` exports the public Firestore to the backup bucket (kept 60 days),
-   then deploys the same image to the public site. To roll back, promote an earlier tag.
+3. Sign in (`gcloud auth login`), then run `tools/gcp-setup.sh` once. It sets up the two Firestore databases
+   in your region (expired sign-ins deleted automatically, the public one backed up daily and kept a week),
+   the two service accounts, the image registry, a backup bucket and a budget alert.
+4. Make a release (below), then `tools/deploy.sh v1.0.0`. That runs the tests against SQLite and the staging
+   database, builds the image from the tag, and deploys it to staging. It then checks the version it reports
+   and makes, syncs and deletes a throwaway account there. Try it at the address it prints.
+5. `tools/deploy.sh --promote v1.0.0` exports the public database to the backup bucket (kept 60 days), then
+   deploys the same image to the public site. To roll back, promote an earlier tag.
 
 Admin commands work there too: `node server/admin.js users --firestore <project>`. To restore a whole
 backup, `gcloud firestore import gs://<project>-backups/<folder>`.
@@ -237,9 +242,9 @@ server/store/       where they're kept: sqlite.js (a database file) or firestore
 server/passwords.js password hashing (scrypt)
 server/version.js   the app's version, and how a git checkout differs from that release
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
-server/test/        tests: `npm test` (SQLite); `npm run test:firestore -- <project>` (SQLite and Firestore)
+server/test/        tests: `npm test` (SQLite); `npm run test:firestore -- <project> <database>` (and Firestore)
 Dockerfile          the Cloud Run image (Firestore store)
-tools/deploy.sh     deploy a release tag to staging, then promote it to the public site
+tools/deploy.sh     deploy a release tag to staging, then promote the same image to the public site
 tools/gcp-setup.sh  one-time Google Cloud setup (settings: local/gcp.env, from tools/gcp.env.example)
 var/                the database (created on first run; not in git)
 tools/build_strokes.py  regenerates data/strokes.js from KanjiVG SVG files

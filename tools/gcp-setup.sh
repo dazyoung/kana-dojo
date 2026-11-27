@@ -1,82 +1,82 @@
 #!/bin/bash
-# One-time Google Cloud setup for Kana Dojo. Run it after creating the two projects in local/gcp.env
-# (staging and public) and linking them to a billing account, with gcloud signed in (gcloud auth login).
-# Safe to run again.
+# One-time Google Cloud setup for Kana Dojo. Run it after creating the project in local/gcp.env and
+# linking it to a billing account, with gcloud signed in (gcloud auth login). Safe to run again.
 #
-# In each project: the APIs, a Firestore database in $REGION (with old sign-ins deleted automatically and
-# daily backups kept a week), and a service account the app runs as, which may only use Firestore.
-# In the public project: the registry for release images (staging may pull from it), a bucket for
-# backups made before each deploy, and a budget alert.
+# Staging and the public site share the project but nothing else: each has its own Cloud Run service, its
+# own Firestore database (public: "(default)", which has the free quota; staging: $STAGING_DATABASE) and its
+# own service account, which may only use its own database. Both databases delete expired sign-ins by
+# themselves; the public one is backed up daily (kept a week). Also: the registry for release images, a
+# bucket for the backups made before each deploy, and a budget alert.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [ ! -f local/gcp.env ]; then echo "Copy tools/gcp.env.example to local/gcp.env and fill it in."; exit 1; fi
 source local/gcp.env
+P="$PROJECT"
 REPO=kana-dojo
-RUNNER=kana-dojo-run
+NUMBER=$(gcloud projects describe "$P" --format='value(projectNumber)')
 
-for P in "$STAGING_PROJECT" "$PUBLIC_PROJECT"; do
-  echo "== $P"
-  gcloud services enable run.googleapis.com firestore.googleapis.com artifactregistry.googleapis.com \
-    cloudbuild.googleapis.com iam.googleapis.com --project "$P"
+echo "== APIs"
+gcloud services enable run.googleapis.com firestore.googleapis.com artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com iam.googleapis.com billingbudgets.googleapis.com --project="$P"
 
-  if ! gcloud firestore databases describe --database='(default)' --project "$P" >/dev/null 2>&1; then
-    gcloud firestore databases create --database='(default)' --location="$REGION" --type=firestore-native --project "$P"
+echo "== Firestore databases, and the accounts that may use them"
+for PAIR in "(default):kana-dojo-run" "$STAGING_DATABASE:kana-dojo-staging-run"; do
+  DB=${PAIR%%:*}
+  SA=${PAIR#*:}
+  if ! gcloud firestore databases describe --database="$DB" --project="$P" >/dev/null 2>&1; then
+    gcloud firestore databases create --database="$DB" --location="$REGION" --type=firestore-native --project="$P"
   fi
-  gcloud firestore fields ttls update expires --collection-group=sessions --enable-ttl --project "$P" --quiet >/dev/null
-  if ! gcloud firestore backups schedules list --database='(default)' --project "$P" --format='value(name)' | grep -q .; then
-    gcloud firestore backups schedules create --database='(default)' --recurrence=daily --retention=7d --project "$P"
+  gcloud firestore fields ttls update expires --collection-group=sessions --enable-ttl \
+    --database="$DB" --project="$P" --quiet >/dev/null
+  if ! gcloud iam service-accounts describe "$SA@$P.iam.gserviceaccount.com" --project="$P" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "$SA" --display-name="Kana Dojo on Cloud Run ($DB)" --project="$P"
   fi
-
-  if ! gcloud iam service-accounts describe "$RUNNER@$P.iam.gserviceaccount.com" --project "$P" >/dev/null 2>&1; then
-    gcloud iam service-accounts create "$RUNNER" --display-name="Kana Dojo on Cloud Run" --project "$P"
-  fi
-  gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$RUNNER@$P.iam.gserviceaccount.com" \
-    --role=roles/datastore.user --condition=None --quiet >/dev/null
+  gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA@$P.iam.gserviceaccount.com" \
+    --role=roles/datastore.user --quiet \
+    --condition="expression=resource.name == \"projects/$P/databases/$DB\",title=only-$(echo "$DB" | tr -cd 'a-z0-9-')" >/dev/null
 done
-
-echo "== Release images ($PUBLIC_PROJECT)"
-if ! gcloud artifacts repositories describe "$REPO" --location="$REGION" --project "$PUBLIC_PROJECT" >/dev/null 2>&1; then
-  gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$REGION" \
-    --description="Kana Dojo releases" --project "$PUBLIC_PROJECT"
+if ! gcloud firestore backups schedules list --database='(default)' --project="$P" --format='value(name)' | grep -q .; then
+  gcloud firestore backups schedules create --database='(default)' --recurrence=daily --retention=7d --project="$P"
 fi
-POLICY=$(mktemp); trap 'rm -f "$POLICY"' EXIT
+
+echo "== Release images"
+if ! gcloud artifacts repositories describe "$REPO" --location="$REGION" --project="$P" >/dev/null 2>&1; then
+  gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$REGION" \
+    --description="Kana Dojo releases" --project="$P"
+fi
+POLICY=$(mktemp)
+trap 'rm -f "$POLICY"' EXIT
 cat > "$POLICY" <<'EOF'
 [{ "name": "keep-10", "action": { "type": "Keep" }, "mostRecentVersions": { "keepCount": 10 } },
  { "name": "delete-older", "action": { "type": "Delete" }, "condition": { "tagState": "any" } }]
 EOF
 gcloud artifacts repositories set-cleanup-policies "$REPO" --location="$REGION" --policy="$POLICY" \
-  --no-dry-run --project "$PUBLIC_PROJECT" --quiet >/dev/null
-STAGING_NUMBER=$(gcloud projects describe "$STAGING_PROJECT" --format='value(projectNumber)')
-PUBLIC_NUMBER=$(gcloud projects describe "$PUBLIC_PROJECT" --format='value(projectNumber)')
-# Staging's Cloud Run may pull the images; the build (as the public project's default account) may push them.
-gcloud artifacts repositories add-iam-policy-binding "$REPO" --location="$REGION" --project "$PUBLIC_PROJECT" \
-  --member="serviceAccount:service-$STAGING_NUMBER@serverless-robot-prod.iam.gserviceaccount.com" \
-  --role=roles/artifactregistry.reader --quiet >/dev/null
+  --no-dry-run --project="$P" --quiet >/dev/null
+# The build runs as the project's default compute account: let it push images and write build logs.
 for ROLE in roles/artifactregistry.writer roles/logging.logWriter roles/storage.objectViewer; do
-  gcloud projects add-iam-policy-binding "$PUBLIC_PROJECT" --member="serviceAccount:$PUBLIC_NUMBER-compute@developer.gserviceaccount.com" \
+  gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$NUMBER-compute@developer.gserviceaccount.com" \
     --role="$ROLE" --condition=None --quiet >/dev/null
 done
 
 echo "== Backup bucket"
-BUCKET="gs://$PUBLIC_PROJECT-backups"
-if ! gcloud storage buckets describe "$BUCKET" --project "$PUBLIC_PROJECT" >/dev/null 2>&1; then
-  gcloud storage buckets create "$BUCKET" --location="$REGION" --uniform-bucket-level-access --project "$PUBLIC_PROJECT"
+BUCKET="gs://$P-backups"
+if ! gcloud storage buckets describe "$BUCKET" --project="$P" >/dev/null 2>&1; then
+  gcloud storage buckets create "$BUCKET" --location="$REGION" --uniform-bucket-level-access --project="$P"
 fi
 LIFECYCLE=$(mktemp)
 echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":60}}]}' > "$LIFECYCLE"
-gcloud storage buckets update "$BUCKET" --lifecycle-file="$LIFECYCLE" --project "$PUBLIC_PROJECT" >/dev/null
+gcloud storage buckets update "$BUCKET" --lifecycle-file="$LIFECYCLE" --project="$P" >/dev/null
 rm -f "$LIFECYCLE"
-# Firestore's own service agent (made when the database was created) writes the exports.
+# Firestore's own service agent (made with the first database) writes the exports.
 gcloud storage buckets add-iam-policy-binding "$BUCKET" \
-  --member="serviceAccount:service-$PUBLIC_NUMBER@gcp-sa-firestore.iam.gserviceaccount.com" \
-  --role=roles/storage.admin --project "$PUBLIC_PROJECT" >/dev/null
+  --member="serviceAccount:service-$NUMBER@gcp-sa-firestore.iam.gserviceaccount.com" \
+  --role=roles/storage.admin --project="$P" >/dev/null
 
 echo "== Budget alert"
-BILLING=$(gcloud billing projects describe "$PUBLIC_PROJECT" --format='value(billingAccountName)' | sed 's#billingAccounts/##')
+BILLING=$(gcloud billing projects describe "$P" --format='value(billingAccountName)' | sed 's#billingAccounts/##')
 if [ -n "$BILLING" ] && ! gcloud billing budgets list --billing-account="$BILLING" --format='value(displayName)' 2>/dev/null | grep -qx 'Kana Dojo'; then
   gcloud billing budgets create --billing-account="$BILLING" --display-name='Kana Dojo' --budget-amount="${BUDGET:-15}" \
-    --filter-projects="projects/$STAGING_PROJECT,projects/$PUBLIC_PROJECT" \
-    --threshold-rule=percent=0.33 --threshold-rule=percent=1.0 ||
+    --filter-projects="projects/$P" --threshold-rule=percent=0.33 --threshold-rule=percent=1.0 ||
     echo "Couldn't create the budget alert; add one in the console under Billing → Budgets & alerts."
 fi
 

@@ -4,10 +4,10 @@
 //
 //   node server/server.js [--port 8000] [--host ::] [--db var/kana-dojo.db] [--signups open|closed]
 //                         [--base /kana] [--trust-proxy 1] [--contact you@example.com] [--log-days 30]
-//                         [--store sqlite|firestore] [--project <gcp project>]
+//                         [--store sqlite|firestore] [--project <gcp project>] [--database staging]
 //
 // (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE,
-// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT.)
+// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT, KANA_FIRESTORE_DB.)
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -32,6 +32,7 @@ const HOST = arg('host', 'HOST', undefined); // default: every interface, IPv4 a
 const STORE = arg('store', 'KANA_STORE', 'sqlite');
 const DB_FILE = path.resolve(ROOT, arg('db', 'KANA_DB', path.join('var', 'kana-dojo.db')));
 const PROJECT = arg('project', 'GOOGLE_CLOUD_PROJECT', '');
+const DATABASE = arg('database', 'KANA_FIRESTORE_DB', '(default)'); // which Firestore database in the project
 const SIGNUPS = arg('signups', 'KANA_SIGNUPS', 'open') !== 'closed';
 // How many proxies in front of the server add to X-Forwarded-For: the client's address is that many
 // entries from the end (earlier entries come from the client and can't be trusted). 0 = no proxy.
@@ -47,9 +48,9 @@ const SIGNUPS_PER_DAY = Math.max(1, Math.floor(Number(process.env.KANA_SIGNUPS_P
 const BASE = String(arg('base', 'KANA_BASE', '')).replace(/\/+$/, '');
 if (BASE && !/^\/[\w.-]+(\/[\w.-]+)*$/.test(BASE)) throw new Error(`--base must look like /kana, not "${BASE}"`);
 
-const store = openStore({ kind: STORE, file: DB_FILE, project: PROJECT });
+const store = openStore({ kind: STORE, file: DB_FILE, project: PROJECT, database: DATABASE });
 const db = accounts(store);
-const STORE_INFO = STORE === 'sqlite' ? `database: ${DB_FILE}` : `store: ${STORE}`;
+const STORE_INFO = STORE === 'sqlite' ? `database: ${DB_FILE}` : `store: ${STORE} ${PROJECT || '(project from Cloud Run)'}/${DATABASE}`;
 
 // ---------------------------------------------------------------------------
 // Responses

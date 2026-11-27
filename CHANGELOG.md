@@ -12,6 +12,10 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- Staging and the public site share one Google Cloud project, each with its own Cloud Run service, Firestore
+  database and service account. `--database` (`KANA_FIRESTORE_DB`) picks the Firestore database.
+- `tools/deploy.sh` checks each deploy by reading Firestore as the service, and on staging by making,
+  syncing and deleting a throwaway account.
 ## 0.5.0 (2026-11-27)
 
 - Storage is split into rules (`server/accounts.js`) and a store that only keeps things
