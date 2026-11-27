@@ -12,6 +12,9 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- Storage is split into rules (`server/accounts.js`) and a store that only keeps things
+  (`server/store/sqlite.js`), with a test suite every store must pass (`npm test`).
+
 ## 0.4.0 (2026-11-27)
 
 - Version numbers. The version shows at the bottom of the home page and in Settings, and at `/api/health`.

@@ -4,16 +4,19 @@
 //
 //   node server/server.js [--port 8000] [--host ::] [--db var/kana-dojo.db] [--signups open|closed]
 //                         [--base /kana] [--trust-proxy 1] [--contact you@example.com] [--log-days 30]
+//                         [--store sqlite|firestore] [--project <gcp project>]
 //
 // (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE,
-// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS.)
+// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT.)
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
 const fs = require('node:fs');
 const zlib = require('node:zlib');
 const path = require('node:path');
-const { open, hashPassword, checkPassword } = require('./db');
+const { openStore } = require('./store');
+const { accounts } = require('./accounts');
+const { hashPassword, checkPassword } = require('./passwords');
 const M = require('../js/merge');
 const { appVersion } = require('./version');
 
@@ -25,7 +28,10 @@ const arg = (name, env, def) => {
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(arg('port', 'PORT', 8000));
 const HOST = arg('host', 'HOST', undefined); // default: every interface, IPv4 and IPv6
+// Where accounts and progress are kept: a SQLite file (--db), or Firestore in a Google Cloud project.
+const STORE = arg('store', 'KANA_STORE', 'sqlite');
 const DB_FILE = path.resolve(ROOT, arg('db', 'KANA_DB', path.join('var', 'kana-dojo.db')));
+const PROJECT = arg('project', 'GOOGLE_CLOUD_PROJECT', '');
 const SIGNUPS = arg('signups', 'KANA_SIGNUPS', 'open') !== 'closed';
 // How many proxies in front of the server add to X-Forwarded-For: the client's address is that many
 // entries from the end (earlier entries come from the client and can't be trusted). 0 = no proxy.
@@ -36,13 +42,14 @@ const LOG_DAYS = Math.max(0, Math.floor(Number(arg('log-days', 'KANA_LOG_DAYS', 
 // New accounts allowed per network address, and in all, each day.
 const SIGNUPS_PER_IP = 5;
 const SIGNUPS_PER_DAY = Math.max(1, Math.floor(Number(process.env.KANA_SIGNUPS_PER_DAY) || 200));
-const MAX_PROGRESS = 4 * 1024 * 1024; // bytes of stored progress per account (a learner who knows everything has ~3 MB)
 // Also serve the app under this path (e.g. /kana, when a reverse proxy publishes it at
 // https://example.com/kana). The app still answers at / too.
 const BASE = String(arg('base', 'KANA_BASE', '')).replace(/\/+$/, '');
 if (BASE && !/^\/[\w.-]+(\/[\w.-]+)*$/.test(BASE)) throw new Error(`--base must look like /kana, not "${BASE}"`);
 
-const db = open(DB_FILE);
+const store = openStore({ kind: STORE, file: DB_FILE, project: PROJECT });
+const db = accounts(store);
+const STORE_INFO = STORE === 'sqlite' ? `database: ${DB_FILE}` : `store: ${STORE}`;
 
 // ---------------------------------------------------------------------------
 // Responses
@@ -206,9 +213,9 @@ function validPassword(pw) {
   if (pw.length > MAX_PASSWORD) throw new HttpError(400, 'That password is too long');
 }
 
-function authUser(req) {
+async function authUser(req) {
   const m = /^Bearer (\S+)$/.exec(String(req.headers.authorization || ''));
-  const user = m && db.sessionUser(m[1]);
+  const user = m && await db.sessionUser(m[1]);
   if (!user) throw new HttpError(401, 'Not signed in');
   return { user, token: m[1] };
 }
@@ -228,15 +235,11 @@ async function verifyPassword(user, pw) {
   return ok;
 }
 
-function syncProgress(userId, incoming) {
-  return db.tx(() => {
-    const raw = db.getProgress(userId);
-    const stored = M.clean(raw);
-    const merged = M.merge(stored, M.clean(incoming));
-    if (Buffer.byteLength(JSON.stringify(merged)) > MAX_PROGRESS) throw new HttpError(413, 'Too much progress to store');
-    if (!raw || !M.same(merged, stored)) db.putProgress(userId, merged, raw && stored);
-    return merged;
-  });
+async function syncProgress(userId, incoming) {
+  try { return await db.syncProgress(userId, incoming); } catch (e) {
+    if (e.code === 'TOO_BIG') throw new HttpError(413, e.message);
+    throw e;
+  }
 }
 
 const routes = {
@@ -257,31 +260,33 @@ const routes = {
     const password = str(body.password);
     if (!USERNAME.test(username)) throw new HttpError(400, 'Usernames are 3–24 letters, numbers, dots, dashes or underscores');
     validPassword(password);
-    if (db.userByName(username)) throw new HttpError(409, 'That username is taken');
-    const hash = await hashPassword(password);
+    if (await db.userByName(username)) throw new HttpError(409, 'That username is taken');
     let id;
-    try { id = db.addUser(username, hash); } catch (e) { throw new HttpError(409, 'That username is taken'); }
+    try { ({ id } = await db.createUser(username, password)); } catch (e) {
+      if (e.code === 'TAKEN') throw new HttpError(409, 'That username is taken');
+      throw e;
+    }
     hit('signup:' + ip);
     hit('signup:all');
-    return { status: 201, body: { username, token: db.newSession(id) } };
+    return { status: 201, body: { username, token: await db.newSession(id) } };
   },
 
   'POST /api/login': async (req) => {
     guardAuthAttempts(req);
     const body = await readJSON(req);
-    const user = db.userByName(str(body.username).trim());
+    const user = await db.userByName(str(body.username).trim());
     if (!(await verifyPassword(user, str(body.password)))) throw new HttpError(401, 'Wrong username or password');
-    return { username: user.username, token: db.newSession(user.id) };
+    return { username: user.username, token: await db.newSession(user.id) };
   },
 
   'POST /api/logout': async (req) => {
-    const { token } = authUser(req);
-    db.endSession(token);
+    const { token } = await authUser(req);
+    await db.endSession(token);
     return { ok: true };
   },
 
   'GET /api/me': async (req) => {
-    const { user } = authUser(req);
+    const { user } = await authUser(req);
     return { username: user.username, created: user.created };
   },
 
@@ -289,32 +294,32 @@ const routes = {
   // Both sides say which progress format they speak (merge.js FORMAT). An app page loaded before an
   // update is refused rather than merged, since it would misread the newer format.
   'POST /api/sync': async (req) => {
-    const { user } = authUser(req);
+    const { user } = await authUser(req);
     if (tooMany('sync:' + user.id, 120, 60e3)) throw new HttpError(429, 'Syncing too often');
     const body = await readJSON(req);
     if (!(Number(body.client) >= M.FORMAT)) throw new HttpError(409, 'The app was updated. Reload the page to keep syncing.');
-    const progress = syncProgress(user.id, body.progress);
+    const progress = await syncProgress(user.id, body.progress);
     return { format: M.FORMAT, progress, stats: M.stats(progress) };
   },
 
   'POST /api/password': async (req) => {
     guardAuthAttempts(req);
-    const { user, token } = authUser(req);
+    const { user, token } = await authUser(req);
     const body = await readJSON(req);
     if (!(await verifyPassword(user, str(body.password)))) throw new HttpError(403, 'Current password is wrong');
     const next = str(body.newPassword);
     validPassword(next);
-    db.setPassword(user.id, await hashPassword(next));
-    db.endOtherSessions(user.id, token); // sign out other devices
+    await db.setPassword(user.id, next);
+    await db.endOtherSessions(user.id, token); // sign out other devices
     return { ok: true };
   },
 
   'POST /api/delete-account': async (req) => {
     guardAuthAttempts(req);
-    const { user } = authUser(req);
+    const { user } = await authUser(req);
     const body = await readJSON(req);
     if (!(await verifyPassword(user, str(body.password)))) throw new HttpError(403, 'Password is wrong');
-    db.deleteUser(user.id); // sessions, progress and snapshots go with it
+    await db.deleteUser(user.id); // sessions, progress and snapshots go with it
     return { ok: true };
   },
 };
@@ -358,16 +363,16 @@ server.headersTimeout = 20e3;
 server.requestTimeout = 60e3;
 
 server.listen(PORT, HOST, () => {
-  console.log(`${new Date().toISOString()} Kana Dojo ${appVersion().label} on http://localhost:${PORT}  (database: ${DB_FILE}, sign-ups ${SIGNUPS ? 'open' : 'closed'})`);
+  console.log(`${new Date().toISOString()} Kana Dojo ${appVersion().label} on http://localhost:${PORT}  (${STORE_INFO}, sign-ups ${SIGNUPS ? 'open' : 'closed'})`);
 });
 
-db.expireSessions();
-setInterval(() => db.expireSessions(), 24 * 3600e3).unref();
+const expire = () => db.expireSessions().catch((e) => console.error(new Date().toISOString(), 'expiring sign-ins failed:', e.message));
+expire();
+setInterval(expire, 24 * 3600e3).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     server.close();
-    db.close();
-    process.exit(0);
+    Promise.resolve(store.close()).finally(() => process.exit(0));
   });
 }

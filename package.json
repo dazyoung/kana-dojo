@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node server/server.js",
+    "test": "node --test server/test/*.test.js",
+    "test:firestore": "node tools/test-firestore.js",
     "version": "node tools/changelog.js"
   }
 }

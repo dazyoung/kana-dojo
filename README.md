@@ -211,9 +211,13 @@ data/kanji.js       JLPT kanji: level, meanings, readings, stroke count (generat
 data/vocab.js       JLPT words: word, reading, meaning (generated)
 data/strokes-n5.js … strokes-n1.js   kanji stroke paths per level, loaded when first needed (generated)
 server/server.js    web server: serves the app + the accounts/sync API
-server/db.js        database (SQLite) + password hashing
+server/accounts.js  accounts, sign-ins and progress: every rule (expiry, snapshots, merging, limits)
+server/store/       where they're kept: sqlite.js (a database file) or firestore.js (Google Cloud);
+                    both have the same methods and pass the same tests (server/test/store.test.js)
+server/passwords.js password hashing (scrypt)
 server/version.js   the app's version, and how a git checkout differs from that release
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
+server/test/        tests: `npm test` (SQLite), `npm run test:firestore` (SQLite and Firestore)
 var/                the database (created on first run; not in git)
 tools/build_strokes.py  regenerates data/strokes.js from KanjiVG SVG files
 tools/build_kanji.py    regenerates the kanji, word and kanji-stroke data files (see Data below)
