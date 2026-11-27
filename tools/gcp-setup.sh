@@ -59,18 +59,28 @@ for ROLE in roles/artifactregistry.writer roles/logging.logWriter roles/storage.
 done
 
 echo "== Backup bucket"
-BUCKET="gs://$P-backups"
-if ! gcloud storage buckets describe "$BUCKET" --project="$P" >/dev/null 2>&1; then
-  gcloud storage buckets create "$BUCKET" --location="$REGION" --uniform-bucket-level-access --project="$P"
+# Straight to the Cloud Storage API: `gcloud storage` crashes when gcloud runs on Python 3.14.
+BUCKET="$P-backups"
+TOKEN=$(gcloud auth print-access-token)
+API=https://storage.googleapis.com/storage/v1
+AUTH=(-H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json')
+EXPIRE='{"lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":60}}]}}' # backups kept 60 days
+if [ "$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$API/b/$BUCKET")" = 404 ]; then
+  curl -fsS -X POST "${AUTH[@]}" "$API/b?project=$P" -d "{\"name\":\"$BUCKET\",\"location\":\"$REGION\",
+    \"iamConfiguration\":{\"uniformBucketLevelAccess\":{\"enabled\":true}}}" >/dev/null
 fi
-LIFECYCLE=$(mktemp)
-echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":60}}]}' > "$LIFECYCLE"
-gcloud storage buckets update "$BUCKET" --lifecycle-file="$LIFECYCLE" --project="$P" >/dev/null
-rm -f "$LIFECYCLE"
-# Firestore's own service agent (made with the first database) writes the exports.
-gcloud storage buckets add-iam-policy-binding "$BUCKET" \
-  --member="serviceAccount:service-$NUMBER@gcp-sa-firestore.iam.gserviceaccount.com" \
-  --role=roles/storage.admin --project="$P" >/dev/null
+curl -fsS -X PATCH "${AUTH[@]}" "$API/b/$BUCKET" -d "$EXPIRE" >/dev/null
+# Firestore's own service agent writes the exports (asking for it makes sure it exists).
+curl -fsS -X POST "${AUTH[@]}" -d '{}' \
+  "https://serviceusage.googleapis.com/v1beta1/projects/$P/services/firestore.googleapis.com:generateServiceIdentity" >/dev/null
+MEMBER="serviceAccount:service-$NUMBER@gcp-sa-firestore.iam.gserviceaccount.com"
+curl -fsS "${AUTH[@]}" "$API/b/$BUCKET/iam" | MEMBER="$MEMBER" node -e '
+  const p = JSON.parse(require("fs").readFileSync(0)); const role = "roles/storage.admin";
+  let b = (p.bindings = p.bindings || []).find((x) => x.role === role);
+  if (!b) p.bindings.push(b = { role, members: [] });
+  if (!b.members.includes(process.env.MEMBER)) b.members.push(process.env.MEMBER);
+  process.stdout.write(JSON.stringify(p));' |
+  curl -fsS -X PUT "${AUTH[@]}" --data-binary @- "$API/b/$BUCKET/iam" >/dev/null
 
 echo "== Budget alert"
 BILLING=$(gcloud billing projects describe "$P" --format='value(billingAccountName)' | sed 's#billingAccounts/##')

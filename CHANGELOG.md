@@ -12,6 +12,9 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- `tools/gcp-setup.sh` makes the backup bucket through the Cloud Storage API, since `gcloud storage` crashes
+  when gcloud runs on Python 3.14.
+
 ## 0.7.0 (2026-11-27)
 
 - An optional "☕ Buy me a coffee" link (`--donate`, `KANA_DONATE_URL`) on the home page, in Settings and
