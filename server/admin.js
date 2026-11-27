@@ -10,7 +10,8 @@
 //   node server/admin.js metrics [days]              usage over the last 30 (or [days]) days
 //
 // Add --db <file> to use a database other than var/kana-dojo.db, or --firestore <project> for the
-// Firestore database of a Google Cloud project (signed in with `gcloud auth login`).
+// Firestore database of a Google Cloud project (signed in with `gcloud auth login`); add --database <name>
+// for a database other than "(default)" (e.g. staging).
 'use strict';
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -24,10 +25,11 @@ const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args.splice(i, 2)[1] : undefined; };
 const DB_FILE = path.resolve(ROOT, flag('--db') || process.env.KANA_DB || 'var/kana-dojo.db');
 const PROJECT = flag('--firestore');
+const DATABASE = flag('--database') || '(default)';
 const [cmd, a1, a2] = args;
 
 if (!PROJECT && !fs.existsSync(DB_FILE)) { console.error(`No database at ${DB_FILE}`); process.exit(1); }
-const store = PROJECT ? openStore({ kind: 'firestore', project: PROJECT }) : openStore({ kind: 'sqlite', file: DB_FILE });
+const store = PROJECT ? openStore({ kind: 'firestore', project: PROJECT, database: DATABASE }) : openStore({ kind: 'sqlite', file: DB_FILE });
 const db = accounts(store);
 const fmt = (t) => (t ? new Date(t).toLocaleString() : '-');
 const describe = (p) => { const s = M.stats(M.clean(p)); return `${s.cards} cards, ${s.answers} answers`; };
