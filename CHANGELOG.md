@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+## 0.8.0 (2026-11-27)
+
 - The "☕ Buy me a coffee" link moves from the bottom of the home page to the header (just ☕ on phones).
 - The public site's address is https://kanadojo.web.app (Firebase Hosting in front of Cloud Run). Pages opened
   at the service's `run.app` address redirect there (`--public-url`).

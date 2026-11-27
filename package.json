@@ -1,6 +1,6 @@
 {
   "name": "kana-dojo",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "Learn to read and write Japanese: kana, JLPT kanji and words, with spaced repetition and handwriting practice.",
   "license": "UNLICENSED",
