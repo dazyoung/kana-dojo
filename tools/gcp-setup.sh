@@ -84,8 +84,8 @@ curl -fsS "${AUTH[@]}" "$API/b/$BUCKET/iam" | MEMBER="$MEMBER" node -e '
 
 echo "== Budget alert"
 BILLING=$(gcloud billing projects describe "$P" --format='value(billingAccountName)' | sed 's#billingAccounts/##')
-if [ -n "$BILLING" ] && ! gcloud billing budgets list --billing-account="$BILLING" --format='value(displayName)' 2>/dev/null | grep -qx 'Kana Dojo'; then
-  gcloud billing budgets create --billing-account="$BILLING" --display-name='Kana Dojo' --budget-amount="${BUDGET:-15}" \
+if [ -n "$BILLING" ] && ! gcloud billing budgets list --billing-account="$BILLING" --billing-project="$P" --format='value(displayName)' 2>/dev/null | grep -qx 'Kana Dojo'; then
+  gcloud billing budgets create --billing-account="$BILLING" --billing-project="$P" --display-name='Kana Dojo' --budget-amount="${BUDGET:-15}" \
     --filter-projects="projects/$P" --threshold-rule=percent=0.33 --threshold-rule=percent=1.0 ||
     echo "Couldn't create the budget alert; add one in the console under Billing → Budgets & alerts."
 fi
