@@ -7,12 +7,14 @@
 //
 // (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE, TRUST_PROXY.)
 'use strict';
+const crypto = require('node:crypto');
 const http = require('node:http');
 const fs = require('node:fs');
 const zlib = require('node:zlib');
 const path = require('node:path');
 const { open, hashPassword, checkPassword } = require('./db');
 const M = require('../js/merge');
+const { appVersion } = require('./version');
 
 const arg = (name, env, def) => {
   const i = process.argv.indexOf('--' + name);
@@ -94,6 +96,17 @@ function publicPath(p) {
   return null;
 }
 
+// index.html is stamped with the app's version (server/version.js): in a <meta> tag the page shows, and
+// in the ?v= on each script and stylesheet, so browsers fetch fresh files after an update.
+const INDEX = path.join(ROOT, 'index.html');
+function indexHtml() {
+  const v = appVersion();
+  const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return fs.readFileSync(INDEX, 'utf8')
+    .replace(/\?v=dev\b/g, '?v=' + encodeURIComponent(v.label))
+    .replace('</head>', `  <meta name="app-version" content="${attr(v.label)}" data-note="${attr(v.note)}">\n</head>`);
+}
+
 function serveStatic(req, res, p) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return sendJSON(res, 405, { error: 'Method not allowed' });
   const file = publicPath(p);
@@ -106,7 +119,9 @@ function serveStatic(req, res, p) {
   const type = TYPES[path.extname(file)] || 'application/octet-stream';
   // Text files are sent gzipped when the browser accepts it (the kanji and word data shrink ~4x).
   const gz = /^(text\/|application\/(json|manifest)|image\/svg)/.test(type) && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
-  const tag = `${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}`;
+  const body = file === INDEX ? Buffer.from(indexHtml()) : null; // generated rather than read as is
+  const tag = body ? crypto.createHash('sha1').update(body).digest('base64url').slice(0, 16)
+    : `${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}`;
   const etag = gz ? `"${tag}-gz"` : `"${tag}"`;
   const headers = {
     ...SECURITY_HEADERS,
@@ -117,8 +132,12 @@ function serveStatic(req, res, p) {
   };
   if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
   if (gz) {
-    const body = gzipped(file, tag);
-    res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': body.length });
+    const out = body ? zlib.gzipSync(body) : gzipped(file, tag);
+    res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': out.length });
+    return res.end(req.method === 'HEAD' ? undefined : out);
+  }
+  if (body) {
+    res.writeHead(200, { ...headers, 'Content-Length': body.length });
     return res.end(req.method === 'HEAD' ? undefined : body);
   }
   res.writeHead(200, { ...headers, 'Content-Length': st.size });
@@ -202,7 +221,7 @@ function syncProgress(userId, incoming) {
 }
 
 const routes = {
-  'GET /api/health': async () => ({ ok: true, signups: SIGNUPS }),
+  'GET /api/health': async () => ({ ok: true, signups: SIGNUPS, version: appVersion().version, build: appVersion().label }),
 
   'POST /api/signup': async (req) => {
     guardAuthAttempts(req);
@@ -311,7 +330,7 @@ server.headersTimeout = 20e3;
 server.requestTimeout = 60e3;
 
 server.listen(PORT, HOST, () => {
-  console.log(`${new Date().toISOString()} Kana Dojo on http://localhost:${PORT}  (database: ${DB_FILE}, sign-ups ${SIGNUPS ? 'open' : 'closed'})`);
+  console.log(`${new Date().toISOString()} Kana Dojo ${appVersion().label} on http://localhost:${PORT}  (database: ${DB_FILE}, sign-ups ${SIGNUPS ? 'open' : 'closed'})`);
 });
 
 db.expireSessions();

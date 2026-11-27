@@ -32,6 +32,10 @@
   const levelKey = (sc) => (sc === 'kanji' ? 'kanjiLevel' : 'vocabLevel');
   const deckLevel = (sc) => Number(S.settings[levelKey(sc)]) || 5;
   const SKILL_NAME = { read: 'reading', write: 'writing', meaning: 'meaning', reading: 'reading' };
+  // The version the server stamped into the page (server/version.js), e.g. 0.4.0 or 0.4.0+dev.1a2b3c4.
+  const VERSION_META = document.querySelector('meta[name="app-version"]');
+  const versionHTML = () => (VERSION_META && VERSION_META.content
+    ? `<span class="ver" title="${esc(VERSION_META.dataset.note || `Kana Dojo ${VERSION_META.content}`)}">Kana Dojo v${esc(VERSION_META.content)}</span>` : '');
   const CREDIT = '<p class="credit">Kanji data: KANJIDIC (EDRDG) · stroke order: KanjiVG · JLPT levels: Jonathan Waller (unofficial) · <button class="btn link" data-act="sources">Sources</button></p>';
   const hasStrokes = (u) => !!(window.STROKES && window.STROKES[u]);
 
@@ -284,7 +288,8 @@
       <div class="chart">${chartHTML(sc)}</div>
       <footer class="foot">${sc === 'kanji' ? 'Tap a kanji for its readings, example words and stroke order.'
         : sc === 'vocab' ? 'Tap a word for its reading, meaning and kanji.' : 'Tap any character for stroke order and writing practice.'}
-        ${deck ? CREDIT : ''}</footer>
+        ${deck ? CREDIT : ''}
+        <p class="ver-line">${versionHTML()}</p></footer>
     </div>`;
   }
 
@@ -1474,7 +1479,7 @@
         <label class="srow"><span>Show romaji, meanings and readings on charts</span>${chk('chartRomaji')}</label>
       </div>
       <p class="muted small-note">Settings apply to this device only. Progress is shared between devices when you’re signed in.</p>
-      <div class="btns left"><button class="btn ghost" data-act="sources">About &amp; data sources</button></div>
+      <div class="btns left"><button class="btn ghost" data-act="sources">About &amp; data sources</button>${versionHTML()}</div>
       <h3>Backup</h3>
       <p class="muted">${synced
         ? 'Your progress is saved in your account. You can also keep a copy as a file.'

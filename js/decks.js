@@ -10,7 +10,8 @@
   const K = window.KANA, R = window.Romaji;
   const KJ = window.KANJI, V = window.VOCAB;
   const LEVELS = [5, 4, 3, 2, 1];
-  const DATA_VERSION = 6; // matches the ?v= in index.html, so stroke files are re-fetched after updates
+  // The app's version, stamped into the page by the server: stroke files are fetched afresh after an update.
+  const DATA_VERSION = encodeURIComponent((document.querySelector('meta[name="app-version"]') || {}).content || 'dev');
   // JLPT → CEFR, approximate. Official reference levels (jlpt.jp, from Dec 2025) depend on the test
   // score: N5 A1, N4 A2, N3 A2/B1, N2 B1/B2, N1 B2/C1. No JLPT level corresponds to C2.
   const CEFR = { 5: 'A1', 4: 'A2', 3: 'A2–B1', 2: 'B1–B2', 1: 'B2–C1' };

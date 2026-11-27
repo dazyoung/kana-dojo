@@ -10,7 +10,7 @@ checking (Apple Pencil, Wacom, mouse or finger), and progress tracked against JL
 Needs [Node](https://nodejs.org) 22 or newer and nothing else (no packages to install).
 
 ```bash
-node server/server.js        # then open http://localhost:8000
+node server/server.js        # then open http://localhost:8000   (or: npm start)
 ./serve.sh [port]            # same, and prints the address to use from other devices on your network
 ```
 
@@ -166,10 +166,31 @@ write it), because recognising a character and producing it are different skills
 - Make up your own little picture stories for characters you keep missing. They stick better than
   borrowed ones.
 
+## Versions and releases
+
+Kana Dojo uses [semantic versioning](https://semver.org): MAJOR for anything that breaks compatibility
+with older pages or saved progress, MINOR for new features, PATCH for fixes. The version is `version` in
+`package.json`, and each release is a git tag (`v0.4.0`). [CHANGELOG.md](CHANGELOG.md) says what's in each.
+
+The version shows at the bottom of the home page, in Settings and at `/api/health`. When the server runs
+from a git checkout that has changes since the release, it says so: `0.4.0+dev.1a2b3c4` means 0.4.0 plus
+unreleased changes (hover it for details). The server also puts the version in the `?v=` on the page's
+files, so browsers fetch fresh copies after an update.
+
+To make a release:
+
+1. List the changes under **Unreleased** in `CHANGELOG.md` as you go, and commit everything.
+2. Run `npm version patch`, `npm version minor` or `npm version major`. It bumps `package.json`, turns
+   "Unreleased" into the new version and today's date, commits that as "Kana Dojo 0.5.0" and tags
+   `v0.5.0`. It refuses if there are uncommitted changes or nothing under "Unreleased".
+3. `git push --follow-tags` when you want it on GitHub.
+
 ## Files
 
 ```
-index.html          app shell
+index.html          app shell (the server stamps the version into it)
+package.json        name and version (no dependencies); `npm start`, `npm version`
+CHANGELOG.md        what changed in each release
 css/style.css       styles (light + dark)
 js/app.js           screens: home, lessons, reviews, words, settings
 js/writer.js        handwriting pad: pointer/pen input, stroke animation, stroke matching
@@ -185,10 +206,12 @@ data/vocab.js       JLPT words: word, reading, meaning (generated)
 data/strokes-n5.js … strokes-n1.js   kanji stroke paths per level, loaded when first needed (generated)
 server/server.js    web server: serves the app + the accounts/sync API
 server/db.js        database (SQLite) + password hashing
+server/version.js   the app's version, and how a git checkout differs from that release
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
 var/                the database (created on first run; not in git)
 tools/build_strokes.py  regenerates data/strokes.js from KanjiVG SVG files
 tools/build_kanji.py    regenerates the kanji, word and kanji-stroke data files (see Data below)
+tools/changelog.js      run by `npm version`: turns "Unreleased" in CHANGELOG.md into the new release
 serve.sh            runs the server and prints the addresses for other devices
 ```
 
@@ -205,7 +228,8 @@ for regular updates), download these into an empty folder and run
 | `JLPT_kanji_ALL.json` | https://github.com/Bluskyo/JLPT_Vocabulary/releases |
 | `vocab-n1.csv` … `vocab-n5.csv` | `src/n1.csv` … `src/n5.csv` from https://github.com/jamsinclair/open-anki-jlpt-decks |
 
-Then bump the `?v=` number in `index.html` and `DATA_VERSION` in `js/decks.js` so browsers fetch the new files.
+Nothing else to bump: browsers check every file for a newer copy on each load, and the version in
+the page's `?v=` changes with each release.
 
 ## Credits
 
