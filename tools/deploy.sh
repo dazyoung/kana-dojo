@@ -31,12 +31,15 @@ fi
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/kana-dojo/app:$VERSION"
 json() { node -pe "const j = JSON.parse(require('fs').readFileSync(0)); $1"; }
 
-deploy() { # service database service-account
-  local SERVICE_NAME=$1 DB=$2 SA=$3
-  local ENV="KANA_STORE=firestore,TRUST_PROXY=1,GOOGLE_CLOUD_PROJECT=$PROJECT,KANA_FIRESTORE_DB=$DB,APP_VERSION=$VERSION"
-  ENV="$ENV,KANA_LOG_DAYS=${KANA_LOG_DAYS:-30}"
-  if [ -n "${KANA_CONTACT:-}" ]; then ENV="$ENV,KANA_CONTACT=$KANA_CONTACT"; fi
-  if [ -n "${KANA_DONATE_URL:-}" ]; then ENV="$ENV,KANA_DONATE_URL=$KANA_DONATE_URL"; fi
+deploy() { # service database service-account [public-url]
+  local SERVICE_NAME=$1 DB=$2 SA=$3 PUBLIC=${4:-}
+  # Variables are separated by '|' (gcloud's ^|^ form), since the network list itself has commas.
+  local ENV="^|^KANA_STORE=firestore|TRUST_PROXY=1|GOOGLE_CLOUD_PROJECT=$PROJECT|KANA_FIRESTORE_DB=$DB|APP_VERSION=$VERSION"
+  ENV="$ENV|KANA_LOG_DAYS=${KANA_LOG_DAYS:-30}"
+  if [ -n "${KANA_CONTACT:-}" ]; then ENV="$ENV|KANA_CONTACT=$KANA_CONTACT"; fi
+  if [ -n "${KANA_DONATE_URL:-}" ]; then ENV="$ENV|KANA_DONATE_URL=$KANA_DONATE_URL"; fi
+  if [ -n "${KANA_PROXY_NETS:-}" ]; then ENV="$ENV|KANA_PROXY_NETS=$KANA_PROXY_NETS"; fi
+  if [ -n "$PUBLIC" ]; then ENV="$ENV|KANA_PUBLIC_URL=$PUBLIC"; fi
   gcloud run deploy "$SERVICE_NAME" --image="$IMAGE" --project="$PROJECT" --region="$REGION" \
     --service-account="$SA@$PROJECT.iam.gserviceaccount.com" --allow-unauthenticated \
     --min-instances=0 --max-instances=3 --cpu=1 --memory=512Mi --concurrency=80 --timeout=60 \
@@ -84,5 +87,10 @@ else
   gcloud firestore export "gs://$PROJECT-backups/before-$VERSION-$(date -u +%Y%m%d-%H%M%S)" \
     --database='(default)' --project="$PROJECT" --quiet
   echo "== Deploying to the public site"
-  deploy "$SERVICE" '(default)' kana-dojo-run
+  deploy "$SERVICE" '(default)' kana-dojo-run "${FIREBASE_SITE:+https://$FIREBASE_SITE.web.app}"
+  if [ -n "${FIREBASE_SITE:-}" ]; then
+    GOT=$(curl -fsS "https://$FIREBASE_SITE.web.app/api/health" | json 'j.build')
+    if [ "$GOT" != "$VERSION" ]; then echo "https://$FIREBASE_SITE.web.app says it's running $GOT, not $VERSION."; exit 1; fi
+    echo "https://$FIREBASE_SITE.web.app is running $VERSION."
+  fi
 fi

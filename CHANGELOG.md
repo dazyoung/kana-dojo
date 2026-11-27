@@ -12,6 +12,11 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- The "☕ Buy me a coffee" link moves from the bottom of the home page to the header (just ☕ on phones).
+- The public site's address is https://kanadojo.web.app (Firebase Hosting in front of Cloud Run). Pages opened
+  at the service's `run.app` address redirect there (`--public-url`).
+- Visitors' addresses are read correctly behind Firebase Hosting (`--proxy-nets`), so the per-address
+  sign-up limit still applies to each visitor rather than to Firebase.
 ## 0.7.1 (2026-11-27)
 
 - Fix: the Firestore store wrote to `null/...` before it had worked out the project's path (found by the

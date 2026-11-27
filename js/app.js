@@ -249,6 +249,8 @@
           <span class="sync-slot">${syncPillHTML()}</span>
           ${streak ? `<button class="pill btn-pill" data-act="stats" title="Days in a row · open stats">${streak}-day streak</button>` : ''}
           <button class="pill btn-pill muted" data-act="stats" title="Answers today · open stats">${S.todayCount()} today</button>
+          ${DONATE_URL ? `<a class="pill donate-pill" href="${esc(DONATE_URL)}" target="_blank" rel="noopener"
+            title="Enjoying Kana Dojo? Support it on ${esc(DONATE_NAME)}">☕<span class="donate-text"> Buy me a coffee</span></a>` : ''}
           <button class="icon" data-act="settings" aria-label="Settings">⚙︎</button>
         </div>
       </header>
@@ -297,7 +299,6 @@
       <footer class="foot">${sc === 'kanji' ? 'Tap a kanji for its readings, example words and stroke order.'
         : sc === 'vocab' ? 'Tap a word for its reading, meaning and kanji.' : 'Tap any character for stroke order and writing practice.'}
         ${deck ? CREDIT : ''}
-        ${DONATE_URL ? `<p class="donate-line">Enjoying Kana Dojo? ${donateHTML()}</p>` : ''}
         <p class="ver-line">${versionHTML()}</p></footer>
     </div>`;
   }

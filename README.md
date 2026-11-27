@@ -38,6 +38,9 @@ Server options (each can also be set with the environment variable shown):
 | `--store` | `KANA_STORE` | `sqlite` | `firestore` keeps accounts in Firestore instead of `--db` (see Hosting on Google Cloud) |
 | `--project` | `GOOGLE_CLOUD_PROJECT` | none | the Google Cloud project, with `--store firestore` (found automatically on Cloud Run) |
 | `--database` | `KANA_FIRESTORE_DB` | `(default)` | which Firestore database in that project |
+| `--public-url` | `KANA_PUBLIC_URL` | none | the site's one public address (e.g. `https://kanadojo.web.app`): pages opened at the service's own `*.run.app` address are redirected there |
+| `--proxy-nets` | `KANA_PROXY_NETS` | none | networks of proxies in front of the `--trust-proxy` ones (e.g. Firebase Hosting's), comma-separated: when the client address falls in one, the address before it is used instead |
+| | `KANA_LOG_FORWARDED` | off | `1` adds each API request's `X-Forwarded-For` and host headers to the log, to check the two settings above |
 
 ## Accounts and syncing
 
@@ -184,11 +187,13 @@ same image is then promoted to the **public** site. Both live in one Google Clou
 else: each has its own Cloud Run service, Firestore database and service account (which can only reach its
 own database).
 
-1. Create a Google Cloud project and link it to a billing account.
+1. Create a Google Cloud project and link it to a billing account. Pick a free `<name>.web.app` address
+   for `FIREBASE_SITE`: Firebase Hosting sits in front of the public service, which gives it that address
+   (with HTTPS) for free.
 2. Copy `tools/gcp.env.example` to `local/gcp.env` (never committed) and fill it in.
 3. Sign in (`gcloud auth login`), then run `tools/gcp-setup.sh` once. It sets up the two Firestore databases
    in your region (expired sign-ins deleted automatically, the public one backed up daily and kept a week),
-   the two service accounts, the image registry, a backup bucket and a budget alert.
+   the two service accounts, the image registry, a backup bucket, a budget alert, and the `web.app` address.
 4. Make a release (below), then `tools/deploy.sh v1.0.0`. That runs the tests against SQLite and the staging
    database, builds the image from the tag, and deploys it to staging. It then checks the version it reports
    and makes, syncs and deletes a throwaway account there. Try it at the address it prints.

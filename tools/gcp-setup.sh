@@ -90,4 +90,29 @@ if [ -n "$BILLING" ] && ! gcloud billing budgets list --billing-account="$BILLIN
     echo "Couldn't create the budget alert; add one in the console under Billing → Budgets & alerts."
 fi
 
+if [ -n "${FIREBASE_SITE:-}" ]; then
+  echo "== Firebase Hosting: https://$FIREBASE_SITE.web.app in front of $SERVICE"
+  gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com --project="$P"
+  TOKEN=$(gcloud auth print-access-token)
+  FB=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P" -H 'Content-Type: application/json')
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "${FB[@]}" "https://firebase.googleapis.com/v1beta1/projects/${P}")" != 200 ]; then
+    curl -fsS -X POST "${FB[@]}" -d '{}' "https://firebase.googleapis.com/v1beta1/projects/${P}:addFirebase" >/dev/null
+    for _ in $(seq 1 40); do
+      [ "$(curl -s -o /dev/null -w '%{http_code}' "${FB[@]}" "https://firebase.googleapis.com/v1beta1/projects/${P}")" = 200 ] && break
+      sleep 3
+    done
+  fi
+  HOSTING=https://firebasehosting.googleapis.com/v1beta1
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "${FB[@]}" "$HOSTING/projects/${P}/sites/${FIREBASE_SITE}")" != 200 ]; then
+    curl -fsS -X POST "${FB[@]}" -d '{}' "$HOSTING/projects/${P}/sites?siteId=${FIREBASE_SITE}" >/dev/null ||
+      { echo "Couldn't claim $FIREBASE_SITE.web.app (taken?): pick another FIREBASE_SITE."; exit 1; }
+  fi
+  # Every path goes to the Cloud Run service; there are no files of its own.
+  VERSION_NAME=$(curl -fsS -X POST "${FB[@]}" "$HOSTING/sites/${FIREBASE_SITE}/versions" \
+    -d "{\"config\":{\"rewrites\":[{\"glob\":\"**\",\"run\":{\"serviceId\":\"$SERVICE\",\"region\":\"$REGION\"}}]}}" |
+    node -pe 'JSON.parse(require("fs").readFileSync(0)).name')
+  curl -fsS -X PATCH "${FB[@]}" -d '{"status":"FINALIZED"}' "$HOSTING/${VERSION_NAME}?update_mask=status" >/dev/null
+  curl -fsS -X POST "${FB[@]}" -d '{}' "$HOSTING/sites/${FIREBASE_SITE}/releases?versionName=${VERSION_NAME}" >/dev/null
+fi
+
 echo "Done. Next: tools/deploy.sh v<version>"

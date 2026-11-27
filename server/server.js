@@ -5,13 +5,16 @@
 //   node server/server.js [--port 8000] [--host ::] [--db var/kana-dojo.db] [--signups open|closed]
 //                         [--base /kana] [--trust-proxy 1] [--contact you@example.com] [--log-days 30]
 //                         [--store sqlite|firestore] [--project <gcp project>] [--database staging]
-//                         [--donate https://buymeacoffee.com/you]
+//                         [--donate https://buymeacoffee.com/you] [--public-url https://example.web.app]
+//                         [--proxy-nets 142.250.0.0/15,…]
 //
 // (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE,
-// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT, KANA_FIRESTORE_DB, KANA_DONATE_URL.)
+// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT, KANA_FIRESTORE_DB, KANA_DONATE_URL,
+// KANA_PUBLIC_URL, KANA_PROXY_NETS; KANA_LOG_FORWARDED=1 also logs each API request's forwarding headers.)
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
+const net = require('node:net');
 const fs = require('node:fs');
 const zlib = require('node:zlib');
 const path = require('node:path');
@@ -38,6 +41,22 @@ const SIGNUPS = arg('signups', 'KANA_SIGNUPS', 'open') !== 'closed';
 // How many proxies in front of the server add to X-Forwarded-For: the client's address is that many
 // entries from the end (earlier entries come from the client and can't be trusted). 0 = no proxy.
 const TRUST_PROXY = Math.max(0, Math.floor(Number(arg('trust-proxy', 'TRUST_PROXY', 0)) || 0));
+// Networks of further proxies that may sit in front of those (e.g. Firebase Hosting in front of Cloud Run).
+// When the address found above is in one of these, the client is the one before it.
+const PROXY_NETS = new net.BlockList();
+const PROXY_NETS_LIST = String(arg('proxy-nets', 'KANA_PROXY_NETS', '')).split(',').map((s) => s.trim()).filter(Boolean);
+for (const cidr of PROXY_NETS_LIST) {
+  const [addr, bits] = cidr.split('/');
+  const type = net.isIPv6(addr) ? 'ipv6' : 'ipv4';
+  if (!net.isIP(addr) || !(Number(bits) >= 0)) throw new Error(`--proxy-nets: "${cidr}" isn't a network like 142.250.0.0/15`);
+  PROXY_NETS.addSubnet(addr, Number(bits), type);
+}
+const inProxyNets = (ip) => net.isIP(ip) > 0 && PROXY_NETS_LIST.length > 0 && PROXY_NETS.check(ip, net.isIPv6(ip) ? 'ipv6' : 'ipv4');
+const LOG_FORWARDED = arg('log-forwarded', 'KANA_LOG_FORWARDED', '') === '1';
+// The site's one public address (e.g. https://kanadojo.web.app): pages opened at the service's own
+// *.run.app address are sent there, so everyone uses the same address (and the same saved progress).
+const PUBLIC_URL = String(arg('public-url', 'KANA_PUBLIC_URL', '')).replace(/\/+$/, '');
+if (PUBLIC_URL && !/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(PUBLIC_URL)) throw new Error(`--public-url must look like https://example.web.app, not "${PUBLIC_URL}"`);
 // Shown in the privacy note: who to contact, and how long server logs are kept (both optional).
 const CONTACT = String(arg('contact', 'KANA_CONTACT', '')).trim();
 // A page where people can support the site (e.g. Buy Me a Coffee). The app links to it; nothing else.
@@ -200,7 +219,11 @@ const LOOPBACK = /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/;
 function clientIp(req) {
   const hops = TRUST_PROXY || (LOOPBACK.test(req.socket.remoteAddress || '') ? 1 : 0);
   const xff = hops && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').map((s) => s.trim()) : [];
-  return (xff.length >= hops && xff[xff.length - hops]) || req.socket.remoteAddress || '?';
+  if (xff.length < hops) return req.socket.remoteAddress || '?';
+  let i = xff.length - hops;
+  // Step back past known proxies (at most 3), never to an entry the client could have written itself.
+  for (let n = 0; n < 3 && i > 0 && inProxyNets(xff[i]); n++) i--;
+  return xff[i] || req.socket.remoteAddress || '?';
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +368,8 @@ async function handleApi(req, res, p) {
     if (!res.headersSent) sendJSON(res, status, { error: status === 500 ? 'Server error' : e.message });
     else res.destroy();
   }
-  console.log(`${new Date().toISOString()} ${clientIp(req)} ${req.method} ${p} ${status} ${Date.now() - t0}ms`);
+  const fwd = LOG_FORWARDED ? ` xff=[${req.headers['x-forwarded-for'] || ''}] host=${req.headers.host || ''} xfh=${req.headers['x-forwarded-host'] || ''}` : '';
+  console.log(`${new Date().toISOString()} ${clientIp(req)} ${req.method} ${p} ${status} ${Date.now() - t0}ms${fwd}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +386,13 @@ const server = http.createServer((req, res) => {
     if (p.startsWith(BASE + '/')) p = p.slice(BASE.length);
   }
   if (p.startsWith('/api/')) return void handleApi(req, res, p);
+  // A page opened at the service's own address goes to the public one. (Requests arriving through
+  // Firebase Hosting carry X-Forwarded-Host, so they're served; API calls are never redirected.)
+  if (PUBLIC_URL && /\.run\.app$/i.test(String(req.headers.host || '').replace(/:\d+$/, '')) && !req.headers['x-forwarded-host'] &&
+      (req.method === 'GET' || req.method === 'HEAD')) {
+    res.writeHead(301, { ...SECURITY_HEADERS, Location: PUBLIC_URL + req.url, 'Cache-Control': 'no-cache' });
+    return res.end();
+  }
   serveStatic(req, res, p);
 });
 server.headersTimeout = 20e3;
