@@ -17,6 +17,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 - A Firestore store (`server/store/firestore.js`, `--store firestore`) for running on Google Cloud, using
   Firestore's REST API (still no dependencies). `npm run test:firestore -- <project>` runs the same tests
   against it.
+- Hosting on Google Cloud: a Dockerfile for Cloud Run, `tools/gcp-setup.sh` (one-time setup) and
+  `tools/deploy.sh` (test a release tag, deploy it to staging, then promote the same image to the public site).
 
 ## 0.4.0 (2026-11-27)
 

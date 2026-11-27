@@ -172,6 +172,26 @@ write it), because recognising a character and producing it are different skills
 - Make up your own little picture stories for characters you keep missing. They stick better than
   borrowed ones.
 
+## Hosting on Google Cloud
+
+A public copy can run on Cloud Run, with accounts and progress in Firestore (`--store firestore`). It sleeps
+when nobody's using it, so small sites cost next to nothing. Two projects keep releases honest: each one goes
+to **staging** first, and the same image is then promoted to the **public** site.
+
+1. Create two Google Cloud projects (staging and public) and link both to a billing account.
+2. Copy `tools/gcp.env.example` to `local/gcp.env` (never committed) and fill it in.
+3. Sign in (`gcloud auth login`), then run `tools/gcp-setup.sh` once. In each project it sets up Firestore
+   in your region (sign-ins deleted when they expire, daily backups kept a week) and an account for the app
+   that may only use Firestore. It also adds the image registry, a backup bucket and a budget alert.
+4. Make a release (below), then `tools/deploy.sh v1.0.0`. That runs the tests against SQLite and the
+   staging Firestore, builds the image from the tag, deploys it to staging and checks the version it
+   reports. Try it at the staging address it prints.
+5. `tools/deploy.sh --promote v1.0.0` exports the public Firestore to the backup bucket (kept 60 days),
+   then deploys the same image to the public site. To roll back, promote an earlier tag.
+
+Admin commands work there too: `node server/admin.js users --firestore <project>`. To restore a whole
+backup, `gcloud firestore import gs://<project>-backups/<folder>`.
+
 ## Versions and releases
 
 Kana Dojo uses [semantic versioning](https://semver.org): MAJOR for anything that breaks compatibility
@@ -217,7 +237,10 @@ server/store/       where they're kept: sqlite.js (a database file) or firestore
 server/passwords.js password hashing (scrypt)
 server/version.js   the app's version, and how a git checkout differs from that release
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
-server/test/        tests: `npm test` (SQLite), `npm run test:firestore` (SQLite and Firestore)
+server/test/        tests: `npm test` (SQLite); `npm run test:firestore -- <project>` (SQLite and Firestore)
+Dockerfile          the Cloud Run image (Firestore store)
+tools/deploy.sh     deploy a release tag to staging, then promote it to the public site
+tools/gcp-setup.sh  one-time Google Cloud setup (settings: local/gcp.env, from tools/gcp.env.example)
 var/                the database (created on first run; not in git)
 tools/build_strokes.py  regenerates data/strokes.js from KanjiVG SVG files
 tools/build_kanji.py    regenerates the kanji, word and kanji-stroke data files (see Data below)

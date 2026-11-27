@@ -1,0 +1,7 @@
+# What gcloud leaves out when it uploads this folder to build the container.
+.git
+.claude
+var
+local
+backup
+node_modules
