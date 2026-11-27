@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+## 0.7.0 (2026-11-27)
+
 - An optional "☕ Buy me a coffee" link (`--donate`, `KANA_DONATE_URL`) on the home page, in Settings and
   in About, mentioned in the privacy note. It's only a link: nothing is loaded from the donation site.
 
