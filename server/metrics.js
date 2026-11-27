@@ -1,5 +1,6 @@
 // Usage metrics: daily totals (visits, answers, sign-ups…) gathered in memory and added to the store
-// about once a minute, so busy minutes cost one write rather than one per request.
+// about once a minute (on the next count or the minute timer), so busy minutes cost one write rather than one
+// per request.
 //
 // Unique visitors and active accounts are counted with one-way codes: sha256 of a random secret kept in the
 // store, the day, and the visitor's address + browser (or the account id), cut to 16 characters. The code
@@ -60,6 +61,19 @@ function metrics(store, opts = {}) {
     buf = fresh();
     write(b);
   }
+
+  // Also save on a timer, so totals don't wait in memory for the next count when the server goes quiet.
+  // (unref: the timer alone doesn't keep the process running.)
+  const pending = () => Object.keys(buf.counters).length || buf.seen.visitors.size || buf.seen.accounts.size;
+  setInterval(() => {
+    roll();
+    if (pending() && now() - lastFlush >= FLUSH_EVERY) {
+      lastFlush = now();
+      const b = buf;
+      buf = fresh();
+      write(b);
+    }
+  }, FLUSH_EVERY).unref();
 
   return {
     // Add to today's totals, e.g. add({ logins: 1 }).

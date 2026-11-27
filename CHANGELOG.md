@@ -12,6 +12,7 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- Usage totals are saved every minute even when no new counts arrive (they used to wait for the next one).
 ## 0.9.0 (2026-11-27)
 
 - Usage metrics, built in and private: the app sends anonymous totals (visits, answers, characters written and
