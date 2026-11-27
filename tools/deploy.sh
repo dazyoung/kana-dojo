@@ -36,6 +36,7 @@ deploy() { # service database service-account
   local ENV="KANA_STORE=firestore,TRUST_PROXY=1,GOOGLE_CLOUD_PROJECT=$PROJECT,KANA_FIRESTORE_DB=$DB,APP_VERSION=$VERSION"
   ENV="$ENV,KANA_LOG_DAYS=${KANA_LOG_DAYS:-30}"
   if [ -n "${KANA_CONTACT:-}" ]; then ENV="$ENV,KANA_CONTACT=$KANA_CONTACT"; fi
+  if [ -n "${KANA_DONATE_URL:-}" ]; then ENV="$ENV,KANA_DONATE_URL=$KANA_DONATE_URL"; fi
   gcloud run deploy "$SERVICE_NAME" --image="$IMAGE" --project="$PROJECT" --region="$REGION" \
     --service-account="$SA@$PROJECT.iam.gserviceaccount.com" --allow-unauthenticated \
     --min-instances=0 --max-instances=3 --cpu=1 --memory=512Mi --concurrency=80 --timeout=60 \

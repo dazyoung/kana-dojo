@@ -33,6 +33,7 @@ Server options (each can also be set with the environment variable shown):
 | `--trust-proxy` | `TRUST_PROXY` | `0` | how many proxies in front of the server add to `X-Forwarded-For` (e.g. `1`); the client's address is taken that many entries from the end. A proxy on the same machine counts as one automatically |
 | `--contact` | `KANA_CONTACT` | none | an email address for questions, shown in the privacy note |
 | `--log-days` | `KANA_LOG_DAYS` | none | how long the server's logs are kept, shown in the privacy note (set it to match your log rotation) |
+| `--donate` | `KANA_DONATE_URL` | none | a page where people can support the site (e.g. `https://buymeacoffee.com/you`); the app links to it from the home page, Settings and About |
 | | `KANA_SIGNUPS_PER_DAY` | `200` | new accounts allowed per day in all (and 5 per network address) |
 | `--store` | `KANA_STORE` | `sqlite` | `firestore` keeps accounts in Firestore instead of `--db` (see Hosting on Google Cloud) |
 | `--project` | `GOOGLE_CLOUD_PROJECT` | none | the Google Cloud project, with `--store firestore` (found automatically on Cloud Run) |

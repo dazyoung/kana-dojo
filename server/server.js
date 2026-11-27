@@ -5,9 +5,10 @@
 //   node server/server.js [--port 8000] [--host ::] [--db var/kana-dojo.db] [--signups open|closed]
 //                         [--base /kana] [--trust-proxy 1] [--contact you@example.com] [--log-days 30]
 //                         [--store sqlite|firestore] [--project <gcp project>] [--database staging]
+//                         [--donate https://buymeacoffee.com/you]
 //
 // (Each flag can also be set with an environment variable: PORT, HOST, KANA_DB, KANA_SIGNUPS, KANA_BASE,
-// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT, KANA_FIRESTORE_DB.)
+// TRUST_PROXY, KANA_CONTACT, KANA_LOG_DAYS, KANA_STORE, GOOGLE_CLOUD_PROJECT, KANA_FIRESTORE_DB, KANA_DONATE_URL.)
 'use strict';
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -39,6 +40,9 @@ const SIGNUPS = arg('signups', 'KANA_SIGNUPS', 'open') !== 'closed';
 const TRUST_PROXY = Math.max(0, Math.floor(Number(arg('trust-proxy', 'TRUST_PROXY', 0)) || 0));
 // Shown in the privacy note: who to contact, and how long server logs are kept (both optional).
 const CONTACT = String(arg('contact', 'KANA_CONTACT', '')).trim();
+// A page where people can support the site (e.g. Buy Me a Coffee). The app links to it; nothing else.
+const DONATE = String(arg('donate', 'KANA_DONATE_URL', '')).trim();
+if (DONATE && !/^https:\/\/[^\s"'<>]+$/.test(DONATE)) throw new Error(`--donate must be an https:// address, not "${DONATE}"`);
 const LOG_DAYS = Math.max(0, Math.floor(Number(arg('log-days', 'KANA_LOG_DAYS', 0)) || 0));
 // New accounts allowed per network address, and in all, each day.
 const SIGNUPS_PER_IP = 5;
@@ -125,7 +129,7 @@ function indexHtml() {
   return fs.readFileSync(INDEX, 'utf8')
     .replace(/\?v=dev\b/g, '?v=' + encodeURIComponent(v.label))
     .replace('</head>', `  <meta name="app-version" content="${attr(v.label)}" data-note="${attr(v.note)}">\n` +
-      `  <meta name="site" data-contact="${attr(CONTACT)}" data-log-days="${LOG_DAYS || ''}">\n</head>`);
+      `  <meta name="site" data-contact="${attr(CONTACT)}" data-log-days="${LOG_DAYS || ''}" data-donate="${attr(DONATE)}">\n</head>`);
 }
 
 function serveStatic(req, res, p) {

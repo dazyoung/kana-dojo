@@ -370,6 +370,9 @@ table.weak .chip { font-size: 20px; padding: 2px 10px; }
 .foot .credit { margin-top: 6px; }
 .ver { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .foot .ver-line { margin: 8px 0 0; }
+.foot .donate-line { margin: 10px 0 0; }
+a.donate { color: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.btns a.donate { align-self: center; }
 .btns .ver { align-self: center; margin-left: auto; }
 .credit .btn.link { padding: 0; font-size: inherit; color: inherit; }
 .choices.wide { grid-template-columns: 1fr; width: min(460px, 94%); }

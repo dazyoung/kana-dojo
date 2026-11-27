@@ -12,6 +12,9 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+- An optional "☕ Buy me a coffee" link (`--donate`, `KANA_DONATE_URL`) on the home page, in Settings and
+  in About, mentioned in the privacy note. It's only a link: nothing is loaded from the donation site.
+
 ## 0.6.0 (2026-11-27)
 
 - Staging and the public site share one Google Cloud project, each with its own Cloud Run service, Firestore

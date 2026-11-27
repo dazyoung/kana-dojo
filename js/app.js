@@ -36,6 +36,14 @@
   const VERSION_META = document.querySelector('meta[name="app-version"]');
   const versionHTML = () => (VERSION_META && VERSION_META.content
     ? `<span class="ver" title="${esc(VERSION_META.dataset.note || `Kana Dojo ${VERSION_META.content}`)}">Kana Dojo v${esc(VERSION_META.content)}</span>` : '');
+  // A link for supporting the site, if the server has one (--donate). Opens the page in a new tab; the app
+  // loads nothing from it.
+  const SITE_META = document.querySelector('meta[name="site"]');
+  const DONATE_URL = (SITE_META && SITE_META.dataset.donate) || '';
+  const DONATE_HOST = DONATE_URL ? new URL(DONATE_URL).hostname.replace(/^www\./, '') : '';
+  const DONATE_NAME = /buymeacoffee\.com$/.test(DONATE_HOST) ? 'Buy Me a Coffee' : DONATE_HOST;
+  const donateHTML = (text = '☕ Buy me a coffee') => (DONATE_URL
+    ? `<a class="donate" href="${esc(DONATE_URL)}" target="_blank" rel="noopener">${text}</a>` : '');
   const CREDIT = '<p class="credit">Kanji data: KANJIDIC (EDRDG) · stroke order: KanjiVG · JLPT levels: Jonathan Waller (unofficial) · <button class="btn link" data-act="sources">Sources</button></p>';
   const hasStrokes = (u) => !!(window.STROKES && window.STROKES[u]);
 
@@ -289,6 +297,7 @@
       <footer class="foot">${sc === 'kanji' ? 'Tap a kanji for its readings, example words and stroke order.'
         : sc === 'vocab' ? 'Tap a word for its reading, meaning and kanji.' : 'Tap any character for stroke order and writing practice.'}
         ${deck ? CREDIT : ''}
+        ${DONATE_URL ? `<p class="donate-line">Enjoying Kana Dojo? ${donateHTML()}</p>` : ''}
         <p class="ver-line">${versionHTML()}</p></footer>
     </div>`;
   }
@@ -1481,7 +1490,7 @@
         <label class="srow"><span>Show romaji, meanings and readings on charts</span>${chk('chartRomaji')}</label>
       </div>
       <p class="muted small-note">Settings apply to this device only. Progress is shared between devices when you’re signed in.</p>
-      <div class="btns left"><button class="btn ghost" data-act="sources">About &amp; data sources</button>${versionHTML()}</div>
+      <div class="btns left"><button class="btn ghost" data-act="sources">About &amp; data sources</button>${donateHTML()}${versionHTML()}</div>
       <h3>Backup</h3>
       <p class="muted">${synced
         ? 'Your progress is saved in your account. You can also keep a copy as a file.'
@@ -1528,6 +1537,8 @@
         <li><b>No email, cookies, ads, analytics or tracking.</b> The app keeps its data in your browser’s own
           storage.</li>
         <li>It’s kept on the server that runs this site and isn’t sold or shared.</li>
+        ${DONATE_URL ? `<li><b>Supporting the site</b> happens on ${esc(DONATE_NAME)}’s own site, under its privacy
+          policy. The app only links there: nothing about it is sent to or kept by this app.</li>` : ''}
       </ul>
       <h3>Your choices</h3>
       <ul class="sources">
@@ -1557,6 +1568,7 @@
         <li><b>JLPT ↔ CEFR</b>: approximate, based on the official
           <a href="https://www.jlpt.jp/e/about/cefr_reference.html" target="_blank" rel="noopener">CEFR reference levels</a> (jlpt.jp).</li>
       </ul>
+      ${DONATE_URL ? `<p>Kana Dojo is free and has no ads. If it helps you, you can ${donateHTML('buy me a coffee ☕')}.</p>` : ''}
       <div class="btns left"><button class="btn link" data-act="privacy">Privacy</button>${versionHTML()}</div>`);
   }
 
