@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+## 0.9.0 (2026-11-27)
+
 - Usage metrics, built in and private: the app sends anonymous totals (visits, answers, characters written and
   learned, lessons, drills, workouts), with or without an account, and the server counts sign-ups, sign-ins
   and syncs. Daily visitors and active accounts are counted by one-way codes kept for two days.
