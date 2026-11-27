@@ -1,7 +1,9 @@
 # Kana Dojo かな道場
 
-A small web app for learning hiragana and katakana: flashcards with spaced repetition, plus
-handwriting practice with stroke-order checking (Apple Pencil, Wacom, mouse or finger).
+A small web app for learning to read and write Japanese: hiragana, katakana, the 2,211 JLPT kanji and
+about 8,000 JLPT words. Flashcards with spaced repetition, handwriting practice with stroke-order
+checking (Apple Pencil, Wacom, mouse or finger), and progress tracked against JLPT N5–N1 and
+(approximately) CEFR A1–C1.
 
 ## Run it
 
@@ -80,8 +82,9 @@ node server/admin.js backup ~/kana-backup.db     # copy the whole database
 
 1. **Learn a lesson** (about 5 characters, in the traditional あいうえお order). For each character you:
    - **meet** it: see it, hear it, and watch the numbered stroke-order animation
-   - **trace** it over a guide, one stroke at a time
-   - **write it from memory**
+   - **write it several times in a row** (a drill), the guide fading each time: trace it over the
+     numbered guide, then over a faint guide, then with only dots where each stroke starts, then twice
+     from memory
    - then do a short quiz on the whole set.
 2. **Do your reviews** whenever the Review button shows cards due. This is spaced repetition: each
    correct answer moves a card up a level and pushes its next review further out. New cards get several
@@ -99,15 +102,31 @@ node server/admin.js backup ~/kana-backup.db     # copy the whole database
    `INTERVALS` in `js/srs.js`.
 3. **Add the next lesson when reviews are done.** A good pace is one lesson a day. That covers the 46
    basic hiragana in about 10 days, and all hiragana (with ゛/゜ and the きゃ-type combos) in about 2 weeks.
-   Then switch the tab to カタカナ and do the same.
+   Then switch the tab to カタカナ and do the same, then on to 漢字 (kanji) and 単語 (words).
 4. **Read words.** Once you know a few characters, *Extra practice → Words* shows real words
    made only of kana you've learned. This is where reading starts to feel natural, so use it often.
-5. **Check your progress** with *Stats* (or tap the streak): characters known and mastered, words you
-   can read, streak and accuracy, characters by stage, answers per day, reviews coming up over the next
-   week, and the characters you miss most.
+5. **Check your progress** with *Stats* (or tap the streak): kana, kanji and words learned, your
+   level against JLPT N5–N1 (≈ CEFR), streak and accuracy, everything by stage, answers per day,
+   reviews coming up over the next week, and the cards you miss most.
 
 Each character has two separate cards, **reading** (kana → romaji) and **writing** (romaji → you
 write it), because recognising a character and producing it are different skills.
+
+### Kanji and words
+
+- **Kanji** (the 漢字 tab) are grouped by JLPT level, N5 to N1, five per lesson, most common first.
+  Each lesson shows a kanji's meanings, on and kun readings, words that use it and its stroke order,
+  has you write it in a drill (trace, faint guide, start points, from memory), then quizzes you. Each kanji has three cards: **meaning**
+  (kanji → English), **reading** (kanji → any of its readings, typed in romaji or kana) and **writing**.
+- **Words** (the 単語 tab) come ten per lesson per JLPT level, ordered so words that use the kanji you
+  learn first come first. Each word has a **meaning** and a **reading** card.
+- Typed meanings accept any listed meaning and forgive a small typo when you press Enter; readings accept
+  any listed reading. "I was right" is there for the rest. With *Reading answers → Choose*, you pick
+  from four instead.
+- The N5–N1 buttons above the chart switch level; tap a kanji or word for its details.
+- *Stats → Language level* counts a kanji or word as known once it's past its first day of reviews,
+  and a JLPT level as reached at 90% of its kanji and words. The CEFR equivalents are approximate: the
+  official ones (jlpt.jp) come from test scores, and N3/N2/N1 each span two CEFR levels.
 
 ### Writing practice
 
@@ -115,9 +134,26 @@ write it), because recognising a character and producing it are different skills
   An accepted stroke snaps to a clean version. A rejected stroke flashes red with a reason
   (wrong direction, wrong order, or wrong shape). After two misses on the same stroke you get a hint.
 - A writing card counts as correct with no hints and at most one missed stroke.
+- **Drills.** Lessons, workouts and the *Drill* button on a character's page have you write the
+  character 5 times in a row: over the numbered guide, over a faint guide, with only the start points,
+  then twice from memory. A from-memory round that isn't clean adds another start-points round and another
+  from-memory round (twice at most). Settings → Writing drill sets 3, 5 or 7 times.
+- **Fix it after a miss.** When you miss a writing card, you watch the stroke order, trace it once and
+  write it twice from memory before moving on. The card still counts as missed and comes back later in
+  the session.
+- **Writing workout** (*Extra practice → Workout*) picks the 5 characters you miss most when writing
+  (in the tab you're on), drills each one, then has you write all 5 once more from memory in a mixed
+  order. Like the rest of *Extra practice*, it counts toward your stats but doesn't change when cards are
+  next due.
+- **Custom set** (the button above the hiragana or katakana chart): pick any characters, by tapping them
+  or a whole row at a time, or *Weakest 5 to write*. Then choose **Lesson** (like *Learn next*: meet each one, a
+  drill, then a quiz) or **Workout** (the drills, then each once more from memory). New characters in a
+  custom lesson join your reviews; ones you'd already learned keep their timing. The pick is remembered
+  on that device, so the next time you open it you can go again.
 - Too strict or too loose? Settings → Stroke checking (Strict / Normal / Relaxed / Off). *Off* lets you
   draw freely, compare against the answer, and grade yourself.
 - Palm rejection: once the app has seen your Pencil or pen, touches from your hand are ignored.
+- In a drill you don't have to wait for the next round: putting the pen down starts it straight away.
 - Tap any character on the chart to watch its stroke order and practise it as much as you like.
 
 ### Tips
@@ -126,6 +162,7 @@ write it), because recognising a character and producing it are different skills
   touch devices) lets you tap instead. The wrong choices are deliberately look-alikes (ぬ/め, シ/ツ…).
 - Keyboard: `Enter` continues, `1`–`4` picks a choice, `H` gives a writing hint, `Esc` exits.
 - Turn on *Vary fonts* once the basics are solid. Real text uses many typefaces.
+- The writing pad accepts strokes that run off its edge; the stroke is checked as drawn.
 - Make up your own little picture stories for characters you keep missing. They stick better than
   borrowed ones.
 
@@ -140,23 +177,52 @@ js/srs.js           progress storage (in the browser) + spaced-repetition schedu
 js/sync.js          accounts + syncing progress with the server
 js/merge.js         progress format and merging (shared by the browser and the server)
 js/romaji.js        answer checking (accepts shi/si, tsu/tu, っ doubling, ー long vowels…)
+js/decks.js         kanji + word decks: lessons, answer checking, choices, loading stroke data
 data/kana.js        kana tables, lesson order, practice words
 data/strokes.js     stroke paths for all kana (generated from KanjiVG)
+data/kanji.js       JLPT kanji: level, meanings, readings, stroke count (generated)
+data/vocab.js       JLPT words: word, reading, meaning (generated)
+data/strokes-n5.js … strokes-n1.js   kanji stroke paths per level, loaded when first needed (generated)
 server/server.js    web server: serves the app + the accounts/sync API
 server/db.js        database (SQLite) + password hashing
 server/admin.js     admin commands (list users, restore snapshots, reset passwords, backups)
 var/                the database (created on first run; not in git)
 tools/build_strokes.py  regenerates data/strokes.js from KanjiVG SVG files
+tools/build_kanji.py    regenerates the kanji, word and kanji-stroke data files (see Data below)
 serve.sh            runs the server and prints the addresses for other devices
 ```
 
-### Later: kanji
+## Data
 
-KanjiVG covers thousands of kanji (all the common ones) in the same format, so the writing pad and
-stroke checker work for kanji unchanged. Adding kanji means adding stroke files to `data/strokes.js` (via
-`tools/build_strokes.py`) plus a kanji deck with meanings and readings.
+The kanji and word files are generated from open datasets. To refresh them (the KANJIDIC licence asks
+for regular updates), download these into an empty folder and run
+`python3 -I tools/build_kanji.py <folder> data/`:
+
+| File | Source |
+| --- | --- |
+| `kanjivg-main.zip` | KanjiVG release, "main" zip: https://github.com/KanjiVG/kanjivg/releases |
+| `kanjidic2.xml.gz` | https://www.edrdg.org/kanjidic/kanjidic2.xml.gz |
+| `JLPT_kanji_ALL.json` | https://github.com/Bluskyo/JLPT_Vocabulary/releases |
+| `vocab-n1.csv` … `vocab-n5.csv` | `src/n1.csv` … `src/n5.csv` from https://github.com/jamsinclair/open-anki-jlpt-decks |
+
+Then bump the `?v=` number in `index.html` and `DATA_VERSION` in `js/decks.js` so browsers fetch the new files.
 
 ## Credits
 
-Stroke-order data: KanjiVG © Ulrich Apel, licensed under
-[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+The app's data files keep their own licences:
+
+- **Stroke order** (kana and kanji): [KanjiVG](https://kanjivg.tagaini.net) © 2009–2026 Ulrich Apel,
+  [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+- **Kanji meanings, readings, stroke counts**: this app uses the
+  [KANJIDIC](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) dictionary file. These files are the
+  property of the [Electronic Dictionary Research and Development Group](https://www.edrdg.org/), and are
+  used in conformance with the Group's [licence](https://www.edrdg.org/edrdg/licence.html) (CC BY-SA 4.0).
+  (The SKIP codes, which have a non-commercial licence, are not used.)
+- **JLPT levels and vocabulary**: Jonathan Waller's JLPT lists (CC BY), via
+  [Bluskyo/JLPT_Vocabulary](https://github.com/Bluskyo/JLPT_Vocabulary) (MIT) and
+  [jamsinclair/open-anki-jlpt-decks](https://github.com/jamsinclair/open-anki-jlpt-decks) (MIT).
+  Unofficial: the JLPT has published no lists since 2010.
+- **JLPT ↔ CEFR**: approximate, from the official
+  [CEFR reference levels](https://www.jlpt.jp/e/about/cefr_reference.html).
+
+The app shows these under Settings → About & data sources, with a credit line on the kanji and word screens.

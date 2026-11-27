@@ -31,6 +31,10 @@
   const MISS_WAIT = 1 * H; // after a miss, the card comes back within the hour
   const DEFAULTS = {
     script: 'hiragana', sound: true, writeReviews: true, leniency: 'normal', varyFont: false, chartRomaji: true,
+    drillLength: '5', // times each character is written in a drill: '3', '5' or '7'
+    customSet: {}, // characters picked for a custom set, per script: { hiragana: ['け', 'こ'] }
+    kanjiLevel: 5, vocabLevel: 5, // JLPT level shown on the Kanji / Words charts
+    voice: '', speechRate: '0.85', // '' = best Japanese voice available
   };
   const SETTING_KEYS = [...Object.keys(DEFAULTS), 'answerMode'];
 
@@ -75,7 +79,8 @@
     key,
     card: (unit, skill) => prog.cards[key(unit, skill)] || null,
     level: (unit, skill) => (prog.cards[key(unit, skill)] || {}).level || 0,
-    isLearned: (unit) => !!prog.cards[key(unit, 'read')],
+    // Kana are learned once they have a reading card; kanji and words once they have a meaning card.
+    isLearned: (unit) => !!(prog.cards[key(unit, 'read')] || prog.cards[key(unit, 'meaning')]),
 
     learn(unit, skills) {
       const now = Date.now();

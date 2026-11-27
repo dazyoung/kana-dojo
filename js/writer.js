@@ -111,6 +111,7 @@
       el('line', { x1: 54.5, y1: 2, x2: 54.5, y2: 107 }, grid);
       el('line', { x1: 2, y1: 54.5, x2: 107, y2: 54.5 }, grid);
       this.gGuide = el('g', { class: 'w-guide' }, svg);
+      this.gDots = el('g', { class: 'w-dots' }, svg);
       this.gDone = el('g', { class: 'w-done' }, svg);
       this.gAnim = el('g', { class: 'w-anim' }, svg);
       this.gHint = el('g', { class: 'w-hint' }, svg);
@@ -128,16 +129,30 @@
       c.addEventListener('pointermove', (e) => this.onMove(e));
       c.addEventListener('pointerup', (e) => this.onUp(e));
       c.addEventListener('pointercancel', (e) => this.onUp(e, true));
+      // A stroke that runs off the pad must still end. Normally pointer capture keeps the events
+      // coming to the canvas, but if capture fails or is lost the release happens elsewhere, and
+      // without these the pad would wait for it forever and ignore every new stroke.
+      c.addEventListener('lostpointercapture', (e) => this.onUp(e));
+      this.onWinUp = (e) => this.onUp(e);
+      this.onWinCancel = (e) => this.onUp(e, true);
+      window.addEventListener('pointerup', this.onWinUp);
+      window.addEventListener('pointercancel', this.onWinCancel);
       c.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false }); // stop iOS scroll/zoom
       this.ro = new ResizeObserver(() => this.resize());
       this.ro.observe(host);
       this.resize();
     }
 
-    destroy() { this.ro.disconnect(); this.animToken++; }
+    destroy() {
+      this.ro.disconnect();
+      this.animToken++;
+      window.removeEventListener('pointerup', this.onWinUp);
+      window.removeEventListener('pointercancel', this.onWinCancel);
+    }
 
     get n() { return this.strokes ? this.strokes.length : 0; }
 
+    // guide: true (full), 'faint', 'dots' (only where each stroke starts) or false.
     load(ch, { mode = 'trace', guide = mode === 'trace', numbers = false } = {}) {
       this.animToken++;
       this.ch = ch;
@@ -150,16 +165,25 @@
       this.hintShown = false;
       this.userStrokes = [];
       this.done = false;
-      [this.gGuide, this.gDone, this.gAnim, this.gHint, this.gNums].forEach((g) => g.replaceChildren());
+      [this.gGuide, this.gDots, this.gDone, this.gAnim, this.gHint, this.gNums].forEach((g) => g.replaceChildren());
       this.clearInk();
       this.host.classList.toggle('is-view', this.mode === 'view');
+      this.host.classList.remove('guide-faint');
       if (!this.strokes) return;
       this.strokes.forEach((d) => el('path', { d }, this.gGuide));
       this.setGuide(guide);
       if (numbers) this.showNumbers();
     }
 
-    setGuide(on) { this.guideOn = on; this.gGuide.style.display = on ? '' : 'none'; }
+    setGuide(on) {
+      this.guideOn = on;
+      this.gGuide.style.display = on && on !== 'dots' ? '' : 'none';
+      this.host.classList.toggle('guide-faint', on === 'faint');
+      this.gDots.replaceChildren();
+      if (on === 'dots' && this.strokes) {
+        this.strokes.forEach((d) => { const p = samplePath(d).pts[0]; el('circle', { cx: p.x, cy: p.y, r: 2.6 }, this.gDots); });
+      }
+    }
 
     showNumbers() {
       this.gNums.replaceChildren();
@@ -269,20 +293,32 @@
       return { x: ((e.clientX - r.left) / r.width) * SIZE, y: ((e.clientY - r.top) / r.height) * SIZE, p };
     }
     onDown(e) {
+      // A finished pad can hand the pen to whatever comes next (a drill's next round) instead of ignoring it.
+      if (this.done && this.opts.onDownWhenDone) this.opts.onDownWhenDone();
       if (this.mode === 'view' || this.done || this.disabled) return;
       if (e.pointerType === 'pen') this.penSeen = true;
       else if (e.pointerType === 'touch' && this.penSeen) return; // palm rejection once a pen is in use
-      if (this.active !== null) return;
+      if (this.active !== null) {
+        // A second finger while one is drawing is ignored. Otherwise the previous stroke ended
+        // without us seeing its release (a pen or mouse has only one pointer), so finish it now.
+        if (e.pointerType === 'touch' && Date.now() - this.lastEvent < 500) return;
+        this.onUp({ pointerId: this.active });
+      }
       e.preventDefault();
       if (this.badTimer) this.redrawInk();
       try { this.canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
       this.active = e.pointerId;
+      this.lastEvent = Date.now();
       this.color = this.inkColor(false);
       this.pts = [this.pointFrom(e)];
     }
     onMove(e) {
       if (e.pointerId !== this.active) return;
+      // Pen or mouse moving with nothing pressed: it was lifted and we missed the release. A pen must
+      // also show no pressure, so a light stroke isn't cut short if its button state flickers.
+      if (e.pointerType !== 'touch' && e.buttons === 0 && !(e.pointerType === 'pen' && e.pressure > 0)) return this.onUp(e);
       e.preventDefault();
+      this.lastEvent = Date.now();
       const evs = (e.getCoalescedEvents && e.getCoalescedEvents()) || [];
       for (const ev of evs.length ? evs : [e]) {
         const q = this.pointFrom(ev);
@@ -293,8 +329,9 @@
       }
     }
     onUp(e, cancelled) {
-      if (e.pointerId !== this.active) return;
+      if (this.active === null || e.pointerId !== this.active) return;
       this.active = null;
+      try { if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
       const pts = this.pts;
       this.pts = null;
       if (cancelled || !pts || pts.length < 2 || polyLen(pts) < 1.5) { this.redrawInk(); return; }
@@ -305,6 +342,7 @@
     feed(pts) { this.finishStroke(pts.map((p) => ({ p: 0.5, ...p }))); }
 
     finishStroke(pts) {
+      if (this.done || this.mode === 'view') return;
       if (this.mode === 'free') {
         this.userStrokes.push(pts);
         this.redrawInk();

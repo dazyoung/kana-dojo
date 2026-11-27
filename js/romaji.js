@@ -96,5 +96,5 @@
     return normKana(romajiToKana(a)) === normKana(word);
   }
 
-  window.Romaji = { units, kanaToRomaji, romajiToKana, checkUnit, checkWord, clean };
+  window.Romaji = { units, kanaToRomaji, romajiToKana, checkUnit, checkWord, clean, toHiragana, normKana };
 })();

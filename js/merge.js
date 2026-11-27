@@ -1,10 +1,10 @@
 // Progress format + merging. Shared by the browser (window.KanaMerge) and the server (require).
 //
-// Progress (format 3):
-//   { v: 3, gen, cards: { "あ|read": { level, due, ok, bad, last, t, at } }, log: { "2026-11-24": { <device>: { n, ok } } } }
+// Progress (format 4):
+//   { v: 4, gen, cards: { "あ|read": { level, due, ok, bad, last, t, at } }, log: { "2026-11-24": { <device>: { n, ok } } } }
 //
 // - cards: one per character+skill. `level` is 1–12 (see INTERVALS in srs.js), `at` is when it was
-//   learned (0 if learned before that was recorded), `t` is when the card last changed; when two
+//   learned (0 if learned before that was recorded). Units are kana, kanji, or words as "w:word:reading"; `t` is when the card last changed; when two
 //   devices both changed a card, the newer change wins.
 // - log: answers per day, counted separately per device so totals from several devices add up
 //   correctly no matter how often they sync (each device's count only ever grows).
@@ -19,11 +19,11 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.KanaMerge = api;
 })(typeof self !== 'undefined' ? self : this, function () {
-  const CARD_KEY = /^[^|\s]{1,24}\|[a-z]{1,16}$/;
+  const CARD_KEY = /^[^|\s]{1,60}\|[a-z]{1,16}$/; // unit (kana, kanji or "w:word:reading") | skill
   const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
   const DEVICE = /^[a-z0-9]{3,32}$/;
   const LIMITS = { cards: 50000, days: 20000, devicesPerDay: 50 };
-  const FORMAT = 3;
+  const FORMAT = 4; // 4: kanji and word cards (longer unit names); otherwise the same as 3
   const OLD_LEVELS = [0, 3, 5, 6, 7, 8, 9, 10, 11]; // format 1–2 level → format 3 level
 
   const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -48,7 +48,7 @@
   function clean(p, device = 'old') {
     const out = empty(isObj(p) ? num(p.gen) : 0);
     if (!isObj(p)) return out;
-    const oldLevels = num(p.v, 1) < FORMAT;
+    const oldLevels = num(p.v, 1) < 3;
     if (isObj(p.cards)) {
       let n = 0;
       for (const k of Object.keys(p.cards)) {

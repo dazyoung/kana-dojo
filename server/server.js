@@ -9,6 +9,7 @@
 'use strict';
 const http = require('node:http');
 const fs = require('node:fs');
+const zlib = require('node:zlib');
 const path = require('node:path');
 const { open, hashPassword, checkPassword } = require('./db');
 const M = require('../js/merge');
@@ -102,17 +103,36 @@ function serveStatic(req, res, p) {
     res.writeHead(404, { ...SECURITY_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('Not found');
   }
-  const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+  const type = TYPES[path.extname(file)] || 'application/octet-stream';
+  // Text files are sent gzipped when the browser accepts it (the kanji and word data shrink ~4x).
+  const gz = /^(text\/|application\/(json|manifest)|image\/svg)/.test(type) && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  const tag = `${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}`;
+  const etag = gz ? `"${tag}-gz"` : `"${tag}"`;
   const headers = {
     ...SECURITY_HEADERS,
-    'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
+    'Content-Type': type,
     'Cache-Control': 'no-cache', // always check for a newer version, so updates show up on reload
     ETag: etag,
+    Vary: 'Accept-Encoding',
   };
   if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+  if (gz) {
+    const body = gzipped(file, tag);
+    res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': body.length });
+    return res.end(req.method === 'HEAD' ? undefined : body);
+  }
   res.writeHead(200, { ...headers, 'Content-Length': st.size });
   if (req.method === 'HEAD') return res.end();
   fs.createReadStream(file).pipe(res);
+}
+
+const gzCache = new Map(); // file -> { tag, body }
+function gzipped(file, tag) {
+  const hit = gzCache.get(file);
+  if (hit && hit.tag === tag) return hit.body;
+  const body = zlib.gzipSync(fs.readFileSync(file), { level: 9 });
+  gzCache.set(file, { tag, body });
+  return body;
 }
 
 // ---------------------------------------------------------------------------
