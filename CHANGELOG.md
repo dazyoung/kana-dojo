@@ -14,6 +14,9 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 - Storage is split into rules (`server/accounts.js`) and a store that only keeps things
   (`server/store/sqlite.js`), with a test suite every store must pass (`npm test`).
+- A Firestore store (`server/store/firestore.js`, `--store firestore`) for running on Google Cloud, using
+  Firestore's REST API (still no dependencies). `npm run test:firestore -- <project>` runs the same tests
+  against it.
 
 ## 0.4.0 (2026-11-27)
 

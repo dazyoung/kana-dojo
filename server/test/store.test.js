@@ -1,10 +1,12 @@
 // The same tests for every store, run through accounts.js (where the rules live), so the SQLite store
 // (a server on its own machine) and the Firestore store (Google Cloud) behave the same.
 //
-//   npm test                  SQLite only
-//   npm run test:firestore    SQLite and Firestore (starts the Firestore emulator; needs Java)
+//   npm test                              SQLite only
+//   npm run test:firestore -- <project>   SQLite, and Firestore in that Google Cloud project (the staging one)
+//   npm run test:firestore                SQLite, and the local Firestore emulator (needs Java)
 //
-// Firestore is tested whenever FIRESTORE_EMULATOR_HOST is set (each run uses its own emulator project).
+// Against a real project every test keeps to collections with its own prefix (test-<run>-<n>-), and
+// deletes its accounts (and so everything in them) when it finishes.
 'use strict';
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,8 +24,24 @@ const BACKENDS = [{
   name: 'sqlite',
   open: () => openStore({ kind: 'sqlite', file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kana-store-')), 'test.db') }),
 }];
-if (process.env.FIRESTORE_EMULATOR_HOST) {
-  BACKENDS.push({ name: 'firestore', open: () => openStore({ kind: 'firestore', project: `kana-test-${crypto.randomBytes(4).toString('hex')}` }) });
+const RUN = crypto.randomBytes(3).toString('hex');
+let opened = 0;
+if (process.env.KANA_TEST_FIRESTORE_PROJECT) {
+  BACKENDS.push({ name: `firestore (${process.env.KANA_TEST_FIRESTORE_PROJECT})`, open: () => wiping(openStore({
+    kind: 'firestore', project: process.env.KANA_TEST_FIRESTORE_PROJECT, prefix: `test-${RUN}-${++opened}-`, partSize: 20000,
+  })) });
+} else if (process.env.FIRESTORE_EMULATOR_HOST) {
+  // A project of its own for each test. Small parts, so splitting large progress gets tested too.
+  BACKENDS.push({ name: 'firestore (emulator)', open: () => openStore({ kind: 'firestore', project: `kana-test-${RUN}-${++opened}`, partSize: 20000 }) });
+}
+// Closing the store deletes every account left in it (and with them, everything they own).
+function wiping(store) {
+  const close = store.close;
+  store.close = async () => {
+    for (const u of await store.listUsers()) await store.deleteUser(u.id);
+    return close();
+  };
+  return store;
 }
 
 // A fresh store and accounts with a clock the test moves by hand.

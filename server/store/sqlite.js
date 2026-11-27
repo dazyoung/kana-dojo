@@ -110,12 +110,13 @@ function open(file) {
     },
 
     // ---------- sessions (keyed by the hash of the browser's token) ----------
-    async addSession(hash, userId, now) { q.addSession.run(hash, uid(userId), now, now); },
+    // `expires` is for stores that delete old sessions themselves (Firestore's TTL); here deleteIdleSessions does it.
+    async addSession(hash, userId, now, expires) { q.addSession.run(hash, uid(userId), now, now); },
     async getSession(hash) {
       const s = q.session.get(hash);
       return s ? { userId: String(s.user_id), created: s.created, used: s.used } : null;
     },
-    async touchSession(hash, now) { q.touchSession.run(now, hash); },
+    async touchSession(hash, now, expires) { q.touchSession.run(now, hash); },
     async deleteSession(hash) { q.delSession.run(hash); },
     // All of a user's sessions, except `keepHash` if given.
     async deleteSessions(userId, keepHash = '') { q.delSessions.run(uid(userId), keepHash); },

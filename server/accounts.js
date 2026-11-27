@@ -52,7 +52,8 @@ function accounts(store, opts = {}) {
     // ---------- sign-ins: the browser holds a random token; only its hash is stored ----------
     async newSession(userId) {
       const token = crypto.randomBytes(32).toString('base64url');
-      await store.addSession(sha(token), userId, now());
+      const t = now();
+      await store.addSession(sha(token), userId, t, t + SESSION_IDLE);
       return token;
     },
     // The user a token belongs to, or null if it's unknown or expired.
@@ -63,7 +64,7 @@ function accounts(store, opts = {}) {
       if (!s) return null;
       const t = now();
       if (t - s.used > SESSION_IDLE) { await store.deleteSession(h); return null; }
-      if (t - s.used > SESSION_TOUCH) await store.touchSession(h, t);
+      if (t - s.used > SESSION_TOUCH) await store.touchSession(h, t, t + SESSION_IDLE);
       return store.userById(s.userId);
     },
     endSession: (token) => store.deleteSession(sha(token)),
