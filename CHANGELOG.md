@@ -12,6 +12,8 @@ into the next release, commits it and tags it (see README → Versions and relea
 
 ## Unreleased
 
+## 0.9.1 (2026-11-27)
+
 - Usage totals are saved every minute even when no new counts arrive (they used to wait for the next one).
 ## 0.9.0 (2026-11-27)
 
